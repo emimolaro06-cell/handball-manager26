@@ -791,6 +791,30 @@ html,body{background:#0A1015}
 }
 .ltabs{display:grid!important;grid-template-columns:repeat(4,1fr)}.ltabs button{padding-left:4px!important;padding-right:4px!important;font-size:13px}
 .bench-r:has(.conv){grid-template-columns:22px 30px minmax(0,1fr) auto auto}
+#lv-panel .feed-r{grid-template-columns:30px 1fr auto;gap:6px 8px;padding:8px 2px}#lv-panel .feed-r .f-tag{grid-column:2;justify-self:start}#lv-panel .feed-r>span:nth-child(3){grid-column:1/-1}
+.ptag.duel{background:rgba(59,130,246,.18);color:#93c5fd}
+/* Próximo partido en una sola pantalla */
+.ad-back{position:fixed;inset:0;background:rgba(5,9,13,.65);z-index:60}
+.ad-panel{position:fixed!important;left:50%;top:5vh;transform:translateX(-50%);width:min(1000px,94vw);max-height:90vh;overflow:auto;z-index:61;margin:0!important;box-shadow:0 30px 80px rgba(0,0,0,.6)}
+.ad-close-w{display:flex;align-items:center;gap:10px}.ad-x{min-height:32px;padding:0 14px}
+@media (min-width:861px){
+  .main.tac-fit{padding-top:12px;padding-bottom:12px}
+  .main.tac-fit>.tactics{flex:1;min-height:0;grid-template-columns:minmax(0,1fr) 320px;align-items:stretch;gap:14px}
+  .main.tac-fit .t-main{display:flex;flex-direction:column;min-height:0;gap:8px}
+  .main.tac-fit .t-head{flex:none;margin:0;flex-wrap:nowrap}
+  .main.tac-fit .t-head>p{flex:1;min-width:0;font-size:12.5px;line-height:1.35;margin:0;max-height:3.6em;overflow:auto}
+  .main.tac-fit .t-controls.info{display:none}
+  .main.tac-fit .t-court-row{flex:1;min-height:0;grid-template-columns:auto minmax(240px,1fr);align-items:stretch;gap:12px}
+  .main.tac-fit .court{height:100%;width:auto;max-width:100%;aspect-ratio:1/1;align-self:start;max-height:100%}
+  .main.tac-fit .t-side{min-height:0;gap:8px}
+  .main.tac-fit .t-side>.card.tight:first-child:not(:last-child){flex:none;max-height:130px;overflow:auto}
+  .main.tac-fit .t-side>.card.tight:has(.bench){flex:1;min-height:0;display:flex;flex-direction:column}
+  .main.tac-fit .bench{flex:1;min-height:0;overflow:auto;max-height:none}
+  .main.tac-fit .t-side>.btn{flex:none}
+  .main.tac-fit .tactic-more{flex:none;margin:0;padding:10px 14px;gap:14px}
+  .main.tac-fit .tactic-more p{display:none}
+  .main.tac-fit .t-panel{position:static;min-height:0;overflow:auto}
+}
 
 </style>
 </head>
@@ -926,9 +950,10 @@ function newMatch(DB, home, away, cfgH, cfgA, wantBox) {
       dsub: cfg.dsub ? { ...cfg.dsub } : aiDsub(DB, lu, avail), swOut: {} };
   };
   const M = { home, away, sides: [mk(home, cfgH), mk(away, cfgA)], score: [0, 0], ht: null, i: 0, contra: [false, false], empty: [false, false], conceded: [false, false], playUses: [{}, {}], events: [], box: {}, wantBox: !!wantBox, done: false };
+  M.ref = (cfgH && cfgH.ref) || (cfgA && cfgA.ref) || { strict: 0.85 + rnd() * 0.35 };
   M.nAtt = Math.round(55 + (RITMO[M.sides[0].tac.ritmo] + RITMO[M.sides[1].tac.ritmo]) * 0.75 + (rnd() * 6 - 3));
   M.total = M.nAtt * 2;
-  for (const S of M.sides) for (const pid of S.avail) M.box[pid] = { g: 0, t: 0, sv: 0, sf: 0, m7: 0, ex: 0, on: 0 };
+  for (const S of M.sides) for (const pid of S.avail) M.box[pid] = { g: 0, t: 0, sv: 0, sf: 0, m7: 0, ex: 0, on: 0, dw: 0, dl: 0, dd: 0 };
   return M;
 }
 const mSec = M => Math.min(3599, Math.floor(M.i / M.total * 3600));
@@ -961,6 +986,8 @@ function aiDsub(DB, lu, avail) {
   }
   return out;
 }
+// marcador directo de cada atacante según el sistema (índice del puesto defensivo)
+const DUEL_MAP = { "6-0": { ED: 0, LD: 1, CE: 3, LI: 4, EI: 5 }, "5-1": { ED: 0, LD: 1, CE: 5, LI: 3, EI: 4 }, "3-2-1": { ED: 0, LD: 3, CE: 5, LI: 4, EI: 2 } };
 function phaseSwap(M, ti, phase) {
   const S = M.sides[ti]; if (!S.dsub) return;
   for (const pos in S.dsub) {
@@ -1056,13 +1083,25 @@ function stepMatch(DB, M) {
     mEv(M, { kind: "perdida", t, pid: who, siete: Atk.siete });
     finished = true;
   }
+  // juego pasivo: el árbitro levanta el brazo y hay que terminar rápido
+  const strict = M.ref.strict || 1;
+  let rushed = false;
+  if (!finished && !isContra) {
+    const lead = M.score[t] > M.score[1 - t];
+    const pp = 0.03 + (Atk.tac.ritmo === "lento" ? 0.045 : Atk.tac.ritmo === "rapido" ? -0.015 : 0) + (mA.riesgo === "seguro" ? 0.02 : 0) + (lead && i > M.total * 0.8 ? 0.03 : 0);
+    if (rnd() < pp * strict) {
+      mEv(M, { kind: "pasivo", t });
+      if (rnd() < 0.35) { M.contra[1 - t] = true; const ps = fieldOn(Atk); mEv(M, { kind: "perdida", t, pid: ps.length ? Atk.court[ps[Math.floor(rnd() * ps.length)]] : null, pasivo: true }); finished = true; }
+      else rushed = true;
+    }
+  }
   if (!finished) {
     let forced7 = false;
     // falta con exclusión o descalificación
     if (!isContra) {
       const pEx = 0.062 + (Def.tac.def === "3-2-1" ? 0.015 : Def.tac.def === "5-1" ? 0.008 : 0) + ({ cerrada: -0.012, agresiva: 0.025 }[mD.actitud] || 0) + dR.nA * 0.003 - dR.nB * 0.001;
       const dps = fieldOn(Def);
-      if (dps.length > 3 && rnd() < pEx) {
+      if (dps.length > 3 && rnd() < pEx * strict) {
         const pos = pickW(dps, dps.map(p => (23 - effAttrs(DB, Def.court[p], p)[6]) * (dR.ant.has(p) ? 1.6 : 1))), pid = Def.court[pos];
         Def.two[pid] = (Def.two[pid] || 0) + 1; M.box[pid].ex++;
         const red = Def.two[pid] >= 3 || rnd() < 0.03;
@@ -1072,9 +1111,35 @@ function stepMatch(DB, M) {
         forced7 = rnd() < 0.3;
       }
     }
+    shot: {
+    // duelo 1 contra 1: el atacante encara a su marcador directo
+    let duel = null;
+    if (!isContra && !forced7) {
+      const act0 = fieldOn(Atk).filter(p => p !== "PI"), ord = defOrd(Def), mp = DUEL_MAP[Def.tac.def] || DUEL_MAP["6-0"];
+      if (act0.length && rnd() < (0.28 + (mA.zona === "pen" ? 0.14 : 0)) * (rushed ? 0.5 : 1)) {
+        const opp = p => { const ds = ord[mp[p]]; return ds && Def.court[ds] != null && !isExcl(Def, ds) ? ds : null; };
+        const av = p => { const a = attrs(DB, Atk, Atk.court[p], p); return a[3] * 0.6 + a[5] * 0.25 + a[7] * 0.15; };
+        const dv = p => { const ds = opp(p); if (ds == null) return 6; const a = defAttrs(DB, Def, Def.court[ds]); return a[6] * 0.6 + a[5] * 0.25 + a[7] * 0.15; };
+        const insD = pid => ({ mas: 1.7, menos: 0.45 }[Atk.instr[pid]] || 1) * (pid === roleOf(Atk, "tirador") ? 1.4 : 1);
+        const ap = pickW(act0, act0.map(p => Math.pow(Math.max(1, av(p)), 3) * Math.exp((av(p) - dv(p)) * 0.25) * insD(Atk.court[p])));
+        const ds = opp(ap), dpid = ds != null ? Def.court[ds] : null, diff = av(ap) - dv(ap), apid = Atk.court[ap];
+        const win = clamp(0.38 + diff * 0.05 + (Def.tac.def === "3-2-1" ? 0.04 : 0) + (dpid != null && dR.ant.has(ds) ? 0.04 : 0), 0.1, 0.88), lose = clamp(0.2 - diff * 0.025, 0.04, 0.42), r = rnd();
+        if (r < win) {
+          M.box[apid].dw++; if (dpid != null) { M.box[dpid].dl++; Def.dLoss = Def.dLoss || {}; const n = Def.dLoss[dpid] = (Def.dLoss[dpid] || 0) + 1; if (n === 3 || n === 6) mEv(M, { kind: "aviso", t: 1 - t, pid: dpid, by: apid, n }); }
+          if (rnd() < 0.2 * strict) {
+            forced7 = true; mEv(M, { kind: "duelo", t, pid: apid, d: dpid, res: "7m" });
+            if (dpid != null && fieldOn(Def).length > 3 && rnd() < 0.28 * strict) { Def.two[dpid] = (Def.two[dpid] || 0) + 1; M.box[dpid].ex++; const red = Def.two[dpid] >= 3; if (red) Def.red.push(dpid); Def.excl.push({ pid: dpid, pos: ds, until: i + 4 }); mEv(M, { kind: red ? "roja" : "excl", t: 1 - t, pid: dpid, third: red }); }
+          } else duel = { ap, apid, dpid, diff };
+        } else if (r < win + lose) {
+          M.box[apid].dl++; if (dpid != null) M.box[dpid].dd++;
+          M.contra[1 - t] = true; M.empty[1 - t] = Atk.siete;
+          mEv(M, { kind: "duelo", t, pid: apid, d: dpid, res: "pierde" }); break shot;
+        }
+      }
+    }
     const sup2 = (fieldOn(Atk).length + (Atk.siete ? 1 : 0)) - fieldOn(Def).length;
     const z = mA.zona, zw = k => z === k ? 1.6 : 1;
-    let type = isContra ? "contra" : forced7 ? "7m" : pickW(["9m", "6m", "ext", "pen", "7m"], [0.40 * zw("9m"), (0.17 + Math.max(0, sup2) * 0.05) * zw("6m"), (0.18 + Math.max(0, sup2) * 0.06) * zw("ext"), 0.17 * zw("pen"), 0.08]);
+    let type = isContra ? "contra" : forced7 ? "7m" : pickW(["9m", "6m", "ext", "pen", "7m"], [0.40 * zw("9m"), (0.17 + Math.max(0, sup2) * 0.05) * zw("6m"), (0.18 + Math.max(0, sup2) * 0.06) * zw("ext"), 0.17 * zw("pen"), 0.05]);
     const act = fieldOn(Atk), late = i > M.total * 0.83 && Math.abs(M.score[0] - M.score[1]) <= 2;
     const ins = pid => ({ mas: 1.7, menos: 0.45 }[Atk.instr[pid]] || 1) * (pid === roleOf(Atk, "tirador") ? 1.8 : 1) * (late && pid === roleOf(Atk, "cierre") ? 2.2 : 1);
     // jugada preparada
@@ -1095,6 +1160,8 @@ function stepMatch(DB, M) {
     else shPos = pickW(act, act.map(p => Math.pow(attrs(DB, Atk, Atk.court[p], p)[5], 2) * (WING.includes(p) ? 1.6 : 1) * (Atk.court[p] === roleOf(Atk, "corredor") ? 2.5 : 1)));
     if (type === "7m") { const sv = roleOf(Atk, "siete"); const sp = act.find(p => Atk.court[p] === sv); if (sp) shPos = sp; }
     if (play) shPos = play.fin;
+    if (duel && !play) { type = "pen"; shPos = duel.ap; }
+    if (rushed && !duel && !play && type !== "7m") { type = "9m"; const c = backs.length ? backs : act; shPos = pickW(c, c.map(p => attrs(DB, Atk, Atk.court[p], p)[0])); }
     const shooter = Atk.court[shPos], sa = attrs(DB, Atk, shooter, shPos);
     const gkPid = Def.court.AR, ga = gkPid != null ? attrs(DB, Def, gkPid, "AR") : Array(8).fill(1);
     let atk = { "9m": sa[0], "6m": sa[1], ext: sa[1], pen: (sa[3] + sa[1]) / 2, "7m": sa[2], contra: (sa[5] + sa[1]) / 2 }[type];
@@ -1109,6 +1176,8 @@ function stepMatch(DB, M) {
     if (mD.actitud === "cerrada") p += type === "9m" ? 0.01 : (type === "6m" || type === "pen") ? -0.035 : type === "ext" ? -0.01 : 0;
     if (mD.actitud === "agresiva") p += (type === "6m" || type === "pen") ? 0.035 : 0;
     if (type === "contra") p += (mA.contra === "12" ? 0.02 : 0) - (mD.contra === "cons" ? 0.05 : 0) - (contragol ? 0.1 : 0);
+    if (duel) p += 0.07 + duel.diff * 0.008;
+    if (rushed) p -= 0.07;
     if (play) { M.playUses[t][play.id] = (M.playUses[t][play.id] || 0) + 1; p += Math.max(-0.01, 0.04 - 0.012 * (M.playUses[t][play.id] - 1)); }
     if (Def.tac.def === "3-2-1") p += type === "9m" ? -0.03 : (type === "6m" || type === "pen") ? 0.04 : 0;
     if (Def.tac.mark != null && Def.tac.mark !== shooter && onCourtSet(Atk).has(Def.tac.mark)) p += 0.01;
@@ -1129,11 +1198,12 @@ function stepMatch(DB, M) {
       b.g++; if (gb && !emptyNet) gb.sf++; M.score[t]++;
       Atk.run++; Def.run = 0;
       M.conceded[1 - t] = true;
-      mEv(M, { kind: "gol", t, pid: shooter, gk: gkPid, type, empty: emptyNet, play: play && play.id, cg: contragol });
+      mEv(M, { kind: "gol", t, pid: shooter, gk: gkPid, type, empty: emptyNet, play: play && play.id, cg: contragol, duel: duel ? duel.dpid : undefined, rushed });
     } else if (!emptyNet && gb && rnd() < (type === "7m" ? 0.8 : 0.7)) {
       gb.sv++; gb.sf++; if (rnd() < 0.2) { M.contra[1 - t] = true; M.empty[1 - t] = Atk.siete; }
-      mEv(M, { kind: "atajada", t, pid: shooter, gk: gkPid, type, play: play && play.id });
+      mEv(M, { kind: "atajada", t, pid: shooter, gk: gkPid, type, play: play && play.id, duel: duel ? duel.dpid : undefined });
     } else { mEv(M, { kind: "fuera", t, pid: shooter, type, palo: rnd() < 0.3, play: play && play.id }); if (Atk.siete) { M.contra[1 - t] = true; M.empty[1 - t] = true; } }
+    }
     // la IA pide minuto si le meten una racha
     if (!Def.manual && Def.run >= 0 && Atk.run >= 4 && Def.tms < 2 && rnd() < 0.6) timeOut(M, 1 - t);
   }
@@ -1343,6 +1413,8 @@ function clubKit(ci) {
   if (b === a || (KIT[a] === "#FFFFFF" && KIT[b] === "#F2C12E")) b = (a + 5) % KIT.length;
   return [KIT[a], KIT[b], "vbhmcl"[Math.floor(r() * 6)]];
 }
+// escala de 1 a 100 para mostrar (internamente el juego usa 1–20)
+const R = v => clampN(Math.round(40 + (v - 6) * 4), 1, 99);
 function clubColors(ci) { const k = clubKit(ci); return [k[0], k[1]]; }
 const ink = hex => { const n = parseInt(hex.slice(1), 16), l = (0.299 * (n >> 16) + 0.587 * (n >> 8 & 255) + 0.114 * (n & 255)); return l > 150 ? "#141414" : "#FFFFFF"; };
 const GOLD = "#C9A227";
@@ -1748,7 +1820,7 @@ function dayEvents() {
   // día siguiente al partido: resumen
   if (G.last && G.lastDay === G.day - 1) resultsNews();
   if (diff > 6) {
-    if (dow === 1 && !G.breakNoted && G.fin) { const exp = ROSTER[G.myClub].filter(pid => contractOf(pid) <= G.season && G.loans[pid] == null); if (exp.length) addMsg("Secretaría técnica", "Contratos que vencen en junio", `<p>Estos jugadores terminan contrato a fin de temporada y se van libres si no los renovás:</p><ul>${exp.map(pid => `<li>${esc(P(pid)[0])} (${P(pid)[2]}, media ${P(pid)[3]})</li>`).join("")}</ul><p>Se renuevan desde el Plantel.</p>`); }
+    if (dow === 1 && !G.breakNoted && G.fin) { const exp = ROSTER[G.myClub].filter(pid => contractOf(pid) <= G.season && G.loans[pid] == null); if (exp.length) addMsg("Secretaría técnica", "Contratos que vencen en junio", `<p>Estos jugadores terminan contrato a fin de temporada y se van libres si no los renovás:</p><ul>${exp.map(pid => `<li>${esc(P(pid)[0])} (${P(pid)[2]}, media ${R(P(pid)[3])})</li>`).join("")}</ul><p>Se renuevan desde el Plantel.</p>`); }
     if (dow === 1 && !G.breakNoted) { G.breakNoted = true; addMsg("Liga", "Pausa en el campeonato", `<p>La liga para por las fiestas de fin de año. Vuelve el ${fDateLong(roundDate(G.season, lg.round))}.</p>`); }
     return;
   }
@@ -1790,7 +1862,7 @@ function boardCheck() {
 function scoutHTML(riv) {
   const rep = rivalReport(riv), lg = G.S.leagues[myLg()], fig = P(rep.fig), sh = P(rep.shooter), pv = P(rep.pivot);
   return `<p>Te paso lo que vimos de ${esc(club(riv).n)}.</p>
-  <ul><li>Defiende en <b>${rep.def}</b> y ataca con ${rep.ritmo}.</li><li>Su figura es <b>${esc(fig[0])}</b> (${fig[2]}, media ${fig[3]}).</li>
+  <ul><li>Defiende en <b>${rep.def}</b> y ataca con ${rep.ritmo}.</li><li>Su figura es <b>${esc(fig[0])}</b> (${fig[2]}, media ${R(fig[3])}).</li>
   <li>El tirador de 9 metros más peligroso es ${esc(sh[0])} (tiro lejano ${sh[8][0]}). En el pivote juega ${esc(pv[0])} (tiro cercano ${pv[8][1]}).</li>
   <li>Su punto más flojo: ${{ arquero: "el arquero", laterales: "los laterales", extremos: "los extremos", pivote: "el pivote", central: "el central" }[rep.weak]}.</li>
   <li>Últimos resultados: ${form(lg, riv).join(" ") || "todavía no jugó"}.</li></ul>`;
@@ -1837,7 +1909,7 @@ function evolvePlayers() {
   });
   G.lastDev = dev;
   const mine = Object.entries(dev).sort((a, b) => b[1] - a[1]);
-  if (mine.length) addMsg("Cuerpo técnico", "Cómo evolucionó el plantel", `<p>Terminada la temporada, así cambiaron los jugadores con respecto al año pasado:</p><ul>${mine.map(([pid, d]) => `<li>${esc(P(+pid)[0])} (${age(+pid) + 1} años): <b class="${d > 0 ? "ok" : "bad"}">${d > 0 ? "+" : ""}${d}</b> → media ${P(+pid)[3]}</li>`).join("")}</ul><p class="muted">Los jóvenes que juegan minutos crecen más. Los veteranos empiezan a bajar después de los 30.</p>`);
+  if (mine.length) addMsg("Cuerpo técnico", "Cómo evolucionó el plantel", `<p>Terminada la temporada, así cambiaron los jugadores con respecto al año pasado:</p><ul>${mine.map(([pid, d]) => `<li>${esc(P(+pid)[0])} (${age(+pid) + 1} años): <b class="${d > 0 ? "ok" : "bad"}">${d > 0 ? "+" : ""}${d}</b> → media ${R(P(+pid)[3])}</li>`).join("")}</ul><p class="muted">Los jóvenes que juegan minutos crecen más. Los veteranos empiezan a bajar después de los 30.</p>`);
 }
 function retirements() {
   const mine = [], famous = [];
@@ -1870,7 +1942,7 @@ function youthIntake() {
     if (ros.length < 22 && r() < 0.7) { const pos = POSS[Math.floor(r() * POSS.length)], media = clampN(Math.round(strength(c) - 4.5 - r() * 3), 5, 15); const pid = genPlayer(c, pos, media, 18, (c * 131 + G.season) % 1e6); G.world.pot[pid] = Math.min(19, Math.round((media + 1.5 + r() * 5) * 10) / 10); }
   }
   buildRosters(DB);
-  addMsg("Divisiones formativas", "Suben juveniles al primer equipo", `<p>Desde las inferiores suben ${mine.length} chicos para esta temporada. Esto es lo que dice el cuerpo técnico de cada uno:</p><ul>${mine.map(pid => `<li><b>${esc(P(pid)[0])}</b> · ${posShort(P(pid)[2])} · ${age(pid)} años · media ${P(pid)[3]} · proyección ${"★".repeat(potStars(pid))}${"☆".repeat(5 - potStars(pid))}</li>`).join("")}</ul><p>Si juegan minutos van a crecer más rápido.</p>`);
+  addMsg("Divisiones formativas", "Suben juveniles al primer equipo", `<p>Desde las inferiores suben ${mine.length} chicos para esta temporada. Esto es lo que dice el cuerpo técnico de cada uno:</p><ul>${mine.map(pid => `<li><b>${esc(P(pid)[0])}</b> · ${posShort(P(pid)[2])} · ${age(pid)} años · media ${R(P(pid)[3])} · proyección ${"★".repeat(potStars(pid))}${"☆".repeat(5 - potStars(pid))}</li>`).join("")}</ul><p>Si juegan minutos van a crecer más rápido.</p>`);
 }
 function movePlayer(pid, to) {
   G.world.club[pid] = to; DB.players[pid][1] = to; buildRosters(DB);
@@ -2431,7 +2503,7 @@ function lockerWeekly() {
   const ref = strength(G.myClub), cands = ROSTER[G.myClub].filter(pid => pmOf(pid) < 32 && P(pid)[3] >= ref - 2 && !(G.promise || {})[pid] && !isInj(pid) && G.loans[pid] == null);
   if (!cands.length || Math.random() < 0.35) return;
   const pid = cands.sort((a, b) => pmOf(a) - pmOf(b))[0]; G.lastConflict = G.day;
-  addMsg(P(pid)[0], "Quiero hablar con usted", `<p>Míster, no estoy contento. Siento que no cuento para usted y así no puedo rendir. Quiero saber qué piensa de mí.</p><p class="muted sm">Ánimo: ${pmLabel(pmOf(pid))}. Media ${P(pid)[3]}, ${posShort(P(pid)[2]).toLowerCase()}.</p>`, { act: "conflict", pid });
+  addMsg(P(pid)[0], "Quiero hablar con usted", `<p>Míster, no estoy contento. Siento que no cuento para usted y así no puedo rendir. Quiero saber qué piensa de mí.</p><p class="muted sm">Ánimo: ${pmLabel(pmOf(pid))}. Media ${R(P(pid)[3])}, ${posShort(P(pid)[2]).toLowerCase()}.</p>`, { act: "conflict", pid });
 }
 function solveConflict(m, opt) {
   const pid = m.pid, t = temple(pid); m.done = true;
@@ -2474,7 +2546,7 @@ function vStaff() {
     const st = G.streak || 0;
     return tabs + `<div class="facts" style="margin-bottom:14px"><div><span class="kicker">ÁNIMO DEL EQUIPO</span><b>${moralLabel(G.moral)}</b></div><div><span class="kicker">RACHA</span><b class="${st > 0 ? "ok" : st < 0 ? "bad" : ""}">${st > 0 ? `${st} ${st === 1 ? "victoria" : "victorias"} seguidas` : st < 0 ? `${-st} ${st === -1 ? "derrota" : "derrotas"} seguidas` : "—"}</b></div><div><span class="kicker">RIESGO DE LESIÓN</span><b class="${injMult() > 1.05 ? "bad" : injMult() < 0.95 ? "ok" : ""}">${injMult() > 1.05 ? "Alto" : injMult() < 0.95 ? "Bajo" : "Normal"}</b></div></div>
       <section class="card flush"><table class="tbl"><thead><tr><th class="tl">JUGADOR</th><th>PUESTO</th><th>MEDIA</th><th class="tl">ÁNIMO</th><th class="tl">CARÁCTER</th><th class="tl">NOTA</th></tr></thead><tbody>${ids.map(pid => { const v = pmOf(pid), pr = (G.promise || {})[pid], t = temple(pid);
-        return `<tr><td class="tl"><b>${esc(P(pid)[0])}</b></td><td>${P(pid)[2]}</td><td>${P(pid)[3]}</td><td class="tl"><span class="pmbar"><i style="width:${v}%;background:${v >= 62 ? "var(--green)" : v >= 45 ? "var(--accent)" : "var(--red)"}"></i></span> <span class="sm ${pmClass(v)}">${pmLabel(v)}</span></td><td class="tl sm muted">${t > 0.7 ? "Competitivo" : t < 0.3 ? "Sensible" : "Tranquilo"}</td><td class="tl sm">${pr ? `Le prometiste minutos (${pr.got}/${pr.need})` : G.listed[pid] ? "Transferible" : ""}</td></tr>`; }).join("")}</tbody></table></section>
+        return `<tr><td class="tl"><b>${esc(P(pid)[0])}</b></td><td>${P(pid)[2]}</td><td>${R(P(pid)[3])}</td><td class="tl"><span class="pmbar"><i style="width:${v}%;background:${v >= 62 ? "var(--green)" : v >= 45 ? "var(--accent)" : "var(--red)"}"></i></span> <span class="sm ${pmClass(v)}">${pmLabel(v)}</span></td><td class="tl sm muted">${t > 0.7 ? "Competitivo" : t < 0.3 ? "Sensible" : "Tranquilo"}</td><td class="tl sm">${pr ? `Le prometiste minutos (${pr.got}/${pr.need})` : G.listed[pid] ? "Transferible" : ""}</td></tr>`; }).join("")}</tbody></table></section>
       <p class="sm muted">El ánimo de cada jugador sube con los triunfos y los minutos, y baja con las derrotas y el banco. Un jugador contento rinde un poco más. Los sensibles se toman peor las críticas; los competitivos responden mejor cuando se les exige.</p>`;
   }
   const card = role => { const s = G.staff[role], [name, desc] = STAFF_ROLES[role];
@@ -2510,7 +2582,7 @@ function aiTransfers() {
     const pid = cands[Math.floor(Math.random() * cands.length)], from = P(pid)[1], fee = from >= 0 ? valueOf(pid) : 0;
     movePlayer(pid, buyer); G.contract[pid] = G.season + 1 + Math.floor(Math.random() * 3);
     if (from >= 0) ensureDepth(from);
-    news("pase", `${P(pid)[0]} (${posShort(pos).toLowerCase()}, media ${P(pid)[3]}) ${from >= 0 ? `deja ${club(from).n} y firma con ${club(buyer).n}${fee ? ` por ${fmtM(fee, curOf(buyer))}` : ""}` : `llega libre a ${club(buyer).n}`}.`, [buyer, from], bl);
+    news("pase", `${P(pid)[0]} (${posShort(pos).toLowerCase()}, media ${R(P(pid)[3])}) ${from >= 0 ? `deja ${club(from).n} y firma con ${club(buyer).n}${fee ? ` por ${fmtM(fee, curOf(buyer))}` : ""}` : `llega libre a ${club(buyer).n}`}.`, [buyer, from], bl);
   }
 }
 function coachFirings() {
@@ -2548,7 +2620,7 @@ function roundAwards() {
   const r = G.rs.round + 1; snapRound();
   if (!Object.keys(best).length) return;
   const team = POS_ORDER.map(p => best[p]).filter(Boolean), mvp = all.sort((a, b) => b[1] - a[1])[0];
-  const line = ([pid, , d]) => `${P(pid)[0]} (${club(P(pid)[1]).n}, ${P(pid)[2] === "AR" ? `${d[3]} atajadas` : `${d[1]} goles`})`;
+  const line = ([pid, , d]) => `${P(pid)[0]} (${club(P(pid)[1]).n}, ${P(pid)[2] === "AR" ? `${R(d[3])} atajadas` : `${d[1]} goles`})`;
   news("ideal", `Equipo ideal de la fecha ${r}: ${team.map(x => `${P(x[0])[2]} ${line(x)}`).join(" · ")}. Figura: ${P(mvp[0])[0]}.`, team.map(x => P(x[0])[1]), myLg());
   const mine = team.filter(x => P(x[0])[1] === G.myClub);
   if (mine.length) { mine.forEach(x => pmAdd(x[0], 4)); addMsg("Prensa", `${mine.length === 1 ? `${P(mine[0][0])[0]} está` : `${mine.length} de los nuestros están`} en el equipo ideal de la fecha`, `<p>${mine.map(x => esc(line(x))).join("<br>")}</p>`); }
@@ -2763,7 +2835,7 @@ function vPre() {
       <div class="filters" style="margin:10px 0">${[3, 4, 5, 6].map(w => `<button class="chip ${C.weeks === w ? "on" : ""}" data-pre="weeks" data-val="${w}">${w} semanas</button>`).join("")}</div>
       <div class="cs-opts">${Object.entries(PRE_LOAD).map(([k, v]) => `<button class="topt ${C.load === k ? "on" : ""}" data-pre="load" data-val="${k}"><b>${v[0]}</b><span class="muted sm">${v[1]}</span></button>`).join("")}</div></section>
     <section class="card"><span class="kicker">AMISTOSOS (HASTA 5)</span><p class="sm muted">Tocá un club para sumarlo o sacarlo. Los partidos de local dejan algo de plata por las entradas.</p>
-      <div class="pre-riv">${G.pre.rivals.map(ci => { const f = frSet.get(ci); return `<div class="pre-r ${f ? "on" : ""}"><button class="pre-rb" data-prefr="${ci}">${badge(ci, 26)}<span><b>${esc(club(ci).n)}</b><span class="muted sm">${esc(LEAGUES[G.clubLeague[ci]].name)} · media ${strength(ci).toFixed(1)}</span></span></button>${f ? `<button class="chip sm ${f.home ? "on" : ""}" data-prehome="${ci}">${f.home ? "Local" : "Visitante"}</button>` : ""}</div>`; }).join("")}</div></section>
+      <div class="pre-riv">${G.pre.rivals.map(ci => { const f = frSet.get(ci); return `<div class="pre-r ${f ? "on" : ""}"><button class="pre-rb" data-prefr="${ci}">${badge(ci, 26)}<span><b>${esc(club(ci).n)}</b><span class="muted sm">${esc(LEAGUES[G.clubLeague[ci]].name)} · media ${R(strength(ci))}</span></span></button>${f ? `<button class="chip sm ${f.home ? "on" : ""}" data-prehome="${ci}">${f.home ? "Local" : "Visitante"}</button>` : ""}</div>`; }).join("")}</div></section>
     <section class="card"><span class="kicker">TORNEO DE VERANO</span><p class="sm muted">Cuadrangular: semifinal y final. Si lo ganás, hay premio.</p>
       <div class="cs-opts">${[[null, "Sin torneo", "Solo amistosos."], ...G.pre.tours.map((T, i) => [i, T.name, `Con ${T.clubs.map(c => club(c).n).join(", ")} · premio ${fmtM(T.prize)}`])].map(([i, n, d]) => `<button class="topt ${C.tour === i ? "on" : ""}" data-pretour="${i == null ? "" : i}"><b>${esc(n)}</b><span class="muted sm">${esc(d)}</span></button>`).join("")}</div></section>
     <section class="card"><span class="kicker">PROBAR JUVENILES</span><p class="sm muted">Los chicos que pruebes suman minutos: el cuerpo técnico conoce su techo real y alguno puede dar un salto.</p>
@@ -2836,10 +2908,16 @@ function fixLineup() {
   }
   return changed;
 }
+// pareja arbitral de cada partido: el criterio cambia cuántas exclusiones, 7 metros y pasivos se cobran
+function refFor(nm) {
+  if (!nm) return null; const r = seedRnd(nm.day * 131 + nm.h * 7 + nm.a * 3 + G.season), nat = natOfClub(nm.h);
+  const a = genName(nat, r), b = genName(nat, r), strict = Math.round((0.82 + r() * 0.42) * 100) / 100;
+  return { names: [a, b], strict, label: strict >= 1.1 ? "estricto" : strict <= 0.92 ? "permisivo" : "normal" };
+}
 function myCfg(riv) {
   const mark = riv != null && G.tac.mark != null && P(G.tac.mark)[1] === riv ? G.tac.mark : null;
   const md = gm(), plays = (G.activePlays || []).map(getPlay).filter(Boolean).map(p => ({ id: p.id, type: p.type, fin: p.fin }));
-  return { lineup: G.lineup, tac: { ...G.tac, dord: G.defOrder || {}, drol: G.defRole || {}, mark, bonus: matchBonus() + styleBonus() + preBonus() + (G.talk && G.talk.day === G.day ? G.talk.s * 0.012 : 0), tb: trainEffects(), model: md, plays, playFreq: FREQ[G.playFreq || "aveces"][1], req: null }, instr: G.instr, squad: squadBench(), dsub: dsubValid(), out: unavailable(), cond: G.cond, manual: G.rot === "manual", mor: G.staff ? myMor() : null, injMult: G.staff ? injMult() : 1 };
+  return { lineup: G.lineup, tac: { ...G.tac, dord: G.defOrder || {}, drol: G.defRole || {}, mark, bonus: matchBonus() + styleBonus() + preBonus() + (G.talk && G.talk.day === G.day ? G.talk.s * 0.012 : 0), tb: trainEffects(), model: md, plays, playFreq: FREQ[G.playFreq || "aveces"][1], req: null }, instr: G.instr, ref: refFor(nextMatch()), squad: squadBench(), dsub: dsubValid(), out: unavailable(), cond: G.cond, manual: G.rot === "manual", mor: G.staff ? myMor() : null, injMult: G.staff ? injMult() : 1 };
 }
 const INJURIES = [["Esguince de tobillo", 7, 18], ["Contractura en el isquiotibial", 5, 12], ["Golpe en la rodilla", 3, 8], ["Rotura fibrilar en el gemelo", 18, 35], ["Lesión en el hombro", 14, 40], ["Esguince de dedo", 4, 10], ["Sobrecarga lumbar", 3, 9]];
 function kickOff() {
@@ -3099,7 +3177,7 @@ function renderInner() {
         </div>
       </header>
       ${sub}
-      <main class="main ${v === "home" ? "fit" : v === "live" && UI.live ? "fit live-fit" : ""}" id="main">${VIEWS[v][1]()}</main>
+      <main class="main ${v === "home" ? "fit" : v === "live" && UI.live ? "fit live-fit" : v === "tactics" ? "fit tac-fit" : ""}" id="main">${VIEWS[v][1]()}</main>
     </div>
     <div class="mbar">
       ${v === "live" ? "" : `<div class="mbar-go">${continueBtn()}</div>`}
@@ -3140,7 +3218,7 @@ function vHome() {
       <div class="facts">
         <div><span class="kicker">DEFIENDE</span><b>${rep.def}</b></div>
         <div><span class="kicker">ATACA</span><b>${rep.ritmo}</b></div>
-        <div><span class="kicker">FIGURA</span><b>${esc(surname(P(rep.fig)[0]))} (${P(rep.fig)[2]})${st && st.g ? ` · ${st.g} goles` : ` · media ${P(rep.fig)[3]}`}</b></div>
+        <div><span class="kicker">FIGURA</span><b>${esc(surname(P(rep.fig)[0]))} (${P(rep.fig)[2]})${st && st.g ? ` · ${st.g} goles` : ` · media ${R(P(rep.fig)[3])}`}</b></div>
         <div><span class="kicker">PUNTO DÉBIL</span><b>${{ arquero: "El arquero", laterales: "Los laterales", extremos: "Los extremos", pivote: "El pivote", central: "El central" }[rep.weak]}</b></div>
       </div>
       <div class="btns"><button class="btn ghost" data-go="tactics">Preparar la táctica</button><button class="btn ghost" data-act="playall">Simular hasta el final</button></div>
@@ -3154,7 +3232,7 @@ function vHome() {
     <button class="link" data-go="table">Ver la tabla completa</button>`;
   } else {
     tbl = `<span class="kicker">FAVORITOS SEGÚN LOS PLANTELES</span>
-    <table class="tbl"><tbody>${lg.clubs.slice().sort((a, b) => strength(b) - strength(a)).slice(0, 6).map((c, i) => `<tr class="${c === G.myClub ? "mine" : ""}"><td>${i + 1}</td><td class="tl">${badge(c, 18)} ${esc(club(c).n)}</td><td>${strength(c).toFixed(1)}</td></tr>`).join("")}</tbody></table>`;
+    <table class="tbl"><tbody>${lg.clubs.slice().sort((a, b) => strength(b) - strength(a)).slice(0, 6).map((c, i) => `<tr class="${c === G.myClub ? "mine" : ""}"><td>${i + 1}</td><td class="tl">${badge(c, 18)} ${esc(club(c).n)}</td><td>${R(strength(c))}</td></tr>`).join("")}</tbody></table>`;
   }
   const msgs = G.inbox.filter(m => m.season === G.season).slice(0, 5);
   const pend = pendingActs();
@@ -3239,7 +3317,7 @@ function vModel() {
   ${sec("DEFENSA", q("Sistema base", chipsRow("def", [["6-0", "6:0"], ["5-1", "5:1"], ["3-2-1", "3:2:1"]], G.tac.def, "tac"), "")
     + q("Sistema alternativo", chipsRow("alt", [["", "Ninguno"], ["6-0", "6:0"], ["5-1", "5:1"], ["3-2-1", "3:2:1"]], M.alt || ""), "Si en el segundo tiempo vamos perdiendo por 3 o más, el ayudante cambia a este sistema.")
     + q("Actitud", chipsRow("actitud", [["cerrada", "Cerrada"], ["equilibrada", "Equilibrada"], ["agresiva", "Agresiva"]], M.actitud), { cerrada: "Protegemos los 6 metros y no salimos a cortar: menos exclusiones, dejamos tirar de lejos.", equilibrada: "", agresiva: "Salimos a cortar líneas de pase y robar: más recuperaciones, más exclusiones y más huecos atrás." }[M.actitud]))}
-  ${sec("RESPONSABILIDADES", ROLES.map(([k, n, d]) => `<div class="role-r"><div><b>${n}</b><p class="sm muted">${d}</p></div><select data-role="${k}"><option value="">— Sin asignar —</option>${roster.map(pid => `<option value="${pid}" ${M.roles[k] === pid ? "selected" : ""}>${esc(P(pid)[0])} (${P(pid)[2]}, ${P(pid)[3]})</option>`).join("")}</select></div>`).join(""))}
+  ${sec("RESPONSABILIDADES", ROLES.map(([k, n, d]) => `<div class="role-r"><div><b>${n}</b><p class="sm muted">${d}</p></div><select data-role="${k}"><option value="">— Sin asignar —</option>${roster.map(pid => `<option value="${pid}" ${M.roles[k] === pid ? "selected" : ""}>${esc(P(pid)[0])} (${P(pid)[2]}, ${R(P(pid)[3])})</option>`).join("")}</select></div>`).join(""))}
   </div>`;
 }
 // ---------- JUGADAS ----------
@@ -3329,7 +3407,7 @@ function vMarket() {
   }).sort((a, b) => P(b)[3] - P(a)[3] || age(a) - age(b));
   const total = list.length, per = 25, page = Math.min(F.page, Math.max(0, Math.ceil(total / per) - 1)); list = list.slice(page * per, page * per + per);
   const sel = UI.mkSel != null && P(UI.mkSel)[1] !== G.myClub ? UI.mkSel : list[0];
-  const rows = list.map(pid => { const p = P(pid), ci = p[1]; return `<tr class="click ${sel === pid ? "sel" : ""}" data-mksel="${pid}"><td class="tl"><div class="pn"><span class="face-s">${faceSVG(pid)}</span><div><b>${esc(p[0])}</b><div class="muted sm">${esc(p[5])} · ${age(pid)} años</div></div></div></td><td class="tl">${ci >= 0 ? `${badge(ci, 18)} <span class="sm">${esc(club(ci).n)}</span>` : '<span class="tag">LIBRE</span>'}</td><td>${p[2]}</td><td><span class="med">${p[3]}</span></td><td>${fmtM(valueOf(pid), curOf(G.myClub))}</td><td class="muted">${contractLabel(pid)}</td></tr>`; }).join("");
+  const rows = list.map(pid => { const p = P(pid), ci = p[1]; return `<tr class="click ${sel === pid ? "sel" : ""}" data-mksel="${pid}"><td class="tl"><div class="pn"><span class="face-s">${faceSVG(pid)}</span><div><b>${esc(p[0])}</b><div class="muted sm">${esc(p[5])} · ${age(pid)} años</div></div></div></td><td class="tl">${ci >= 0 ? `${badge(ci, 18)} <span class="sm">${esc(club(ci).n)}</span>` : '<span class="tag">LIBRE</span>'}</td><td>${p[2]}</td><td><span class="med">${R(p[3])}</span></td><td>${fmtM(valueOf(pid), curOf(G.myClub))}</td><td class="muted">${contractLabel(pid)}</td></tr>`; }).join("");
   return `<div class="mk-head"><div class="mk-stat"><span class="kicker">PRESUPUESTO</span><b>${fmtM(G.fin.bal)}</b></div><div class="mk-stat"><span class="kicker">MASA SALARIAL</span><b>${fmtM(wageBill())}</b><span class="sm muted">de ${fmtM(G.fin.wcap)} por año</span></div>
       <div class="mk-stat"><span class="kicker">MERCADO</span><b class="${w.open ? "ok" : "bad"}">${w.open ? "Abierto" : "Cerrado"}</b><span class="sm muted">${w.open ? `Cierra el ${fDateShort(dayDate(w.until))}` : w.next ? `Abre el ${fDateShort(dayDate(w.next))}` : "Abre al terminar la temporada"}</span></div>
       <div class="mk-stat"><span class="kicker">OFERTAS EN CURSO</span><b>${G.offers.length}</b><span class="sm muted">${G.offers.length ? "La respuesta llega al día siguiente" : "Ninguna"}</span></div></div>
@@ -3338,7 +3416,7 @@ function vMarket() {
         <input class="mk-q" id="mk-q" placeholder="Buscar por nombre…" value="${esc(F.q)}">
         <select data-mkf="pos">${Object.entries(FILTERS).map(([k, [l]]) => `<option value="${k}" ${F.pos === k ? "selected" : ""}>${k === "todos" ? "Todos los puestos" : l}</option>`).join("")}</select>
         <select data-mkf="lg"><option value="todas">Todas las ligas</option>${Object.keys(LEAGUES).map(id => `<option value="${id}" ${F.lg === id ? "selected" : ""}>${esc(LG_LABEL(id))}</option>`).join("")}</select>
-        <select data-mkf="min">${[0, 10, 12, 14, 16].map(v => `<option value="${v}" ${F.min === v ? "selected" : ""}>${v ? "Media " + v + " o más" : "Cualquier media"}</option>`).join("")}</select>
+        <select data-mkf="min">${[0, 10, 12, 14, 16].map(v => `<option value="${v}" ${F.min === v ? "selected" : ""}>${v ? "Media " + R(v) + " o más" : "Cualquier media"}</option>`).join("")}</select>
         <select data-mkf="age">${[40, 30, 26, 23, 21].map(v => `<option value="${v}" ${F.age === v ? "selected" : ""}>${v === 40 ? "Cualquier edad" : "Hasta " + v + " años"}</option>`).join("")}</select>
         <label class="chk sm"><input type="checkbox" id="mk-libres" ${F.libres ? "checked" : ""}> Solo libres</label>
       </div>
@@ -3477,7 +3555,7 @@ function vPrematch() {
   const rows = POS_ORDER.map(pos => { const p = P(lu[pos]), r = ratingAt(DB, lu[pos], pos); return `<div class="pm-r"><span class="d-pos">${pos}</span><span class="num-c">${p[7] || ""}</span><span class="bn">${esc(p[0])}</span>${condBar(lu[pos])}<span class="med ${r < p[3] ? "warn" : ""}">${r}</span></div>`; }).join("");
   const na = unavailable(), tired = POS_ORDER.map(p => lu[p]).filter(pid => condOf(pid) < 70);
   const pend = pendingActs().filter(m => m.act === "press" && m.day === G.day - 1);
-  return `<section class="card prematch"><div class="pm-vs"><div class="pm-t">${badge(nm.h, 84)}<b>${esc(club(nm.h).n)}</b></div><div class="pm-mid"><span class="kicker">${nm.comp !== "liga" ? esc(nm.label.toUpperCase()) : `FECHA ${nm.round} · ${esc(LEAGUES[myLg()].name.toUpperCase())}`}</span><span class="pm-x">VS</span><span class="muted sm">${esc(club(nm.h).s || club(nm.h).c || "")}</span>${(() => { const rv = nm.h === G.myClub ? nm.a : nm.h, c = coachOf(rv); return `<span class="sm" style="margin-top:6px">DT rival: <b>${esc(c.name)}</b> · ${COACH_STYLES[c.style][0].toLowerCase()}</span>`; })()}</div><div class="pm-t">${badge(nm.a, 84)}<b>${esc(club(nm.a).n)}</b></div></div></section>
+  return `<section class="card prematch"><div class="pm-vs"><div class="pm-t">${badge(nm.h, 84)}<b>${esc(club(nm.h).n)}</b></div><div class="pm-mid"><span class="kicker">${nm.comp !== "liga" ? esc(nm.label.toUpperCase()) : `FECHA ${nm.round} · ${esc(LEAGUES[myLg()].name.toUpperCase())}`}</span><span class="pm-x">VS</span><span class="muted sm">${esc(club(nm.h).s || club(nm.h).c || "")}</span>${(() => { const rv = nm.h === G.myClub ? nm.a : nm.h, c = coachOf(rv); const rf = refFor(nm); return `<span class="sm" style="margin-top:6px">DT rival: <b>${esc(c.name)}</b> · ${COACH_STYLES[c.style][0].toLowerCase()}</span>${rf ? `<span class="sm muted">Árbitros: ${esc(rf.names.map(surname).join(" / "))} · criterio <b class="${rf.label === "estricto" ? "bad" : rf.label === "permisivo" ? "ok" : ""}">${rf.label}</b></span>` : ""}`; })()}</div><div class="pm-t">${badge(nm.a, 84)}<b>${esc(club(nm.a).n)}</b></div></div></section>
   <div class="two">
     <section class="card"><div class="row-between"><span class="kicker">TU SIETE</span><button class="link sm" data-go="tactics">Cambiar</button></div>${rows}</section>
     <section class="card"><span class="kicker">CÓMO LLEGAMOS</span>
@@ -3595,11 +3673,11 @@ function stepHighlight(L, dt, now) {
   }
   if (t >= 1) { L.teams[h.atk].pl.forEach(p => p.jump = 0); L.atk = 1 - h.atk; L.hl = null; L.lastSwitch = L.sec; L.holder = null; }
 }
-const SMALL_BANNER = { excl: ["2 MINUTOS", "#F5C451"], roja: ["DESCALIFICADO", "#FF6B6B"], tm: ["TIEMPO MUERTO", "#FFFFFF"], lesion: ["LESIÓN", "#FF6B6B"] };
+const SMALL_BANNER = { pasivo: ["JUEGO PASIVO", "#F5C451"], aviso: ["OJO", "#3B82F6"], excl: ["2 MINUTOS", "#F5C451"], roja: ["DESCALIFICADO", "#FF6B6B"], tm: ["TIEMPO MUERTO", "#FFFFFF"], lesion: ["LESIÓN", "#FF6B6B"] };
 function showEv(L, e) {
   if (e._shown) return; e._shown = true; L.shown.push(e);
   if (e.kind === "gol") L.score = e.s.slice(); if (e.kind === "gol" && e.s) L.score = [e.s[0], e.s[1]];
-  if (SMALL_BANNER[e.kind] && !L.hl) L.banner = { text: SMALL_BANNER[e.kind][0], color: SMALL_BANNER[e.kind][1], name: e.kind === "tm" ? club(e.t === 0 ? L.M.home : L.M.away).n : P(e.pid)[0], t: 0, small: true };
+  if (SMALL_BANNER[e.kind] && !L.hl && !(e.kind === "aviso" && e.t !== L.mine)) L.banner = { text: SMALL_BANNER[e.kind][0], color: SMALL_BANNER[e.kind][1], name: e.kind === "tm" || e.kind === "pasivo" ? club(e.t === 0 ? L.M.home : L.M.away).n : e.kind === "aviso" ? `Le ganan siempre el 1 vs 1 a ${surname(P(e.pid)[0])}` : P(e.pid)[0], t: 0, small: true };
   if (["gol", "atajada", "excl", "roja", "tm", "lesion", "cambio"].includes(e.kind)) L.dirty = true;
 }
 function wantsHighlight(L, e) {
@@ -3711,23 +3789,28 @@ function evLine(e, homeId, awayId, compact) {
     gol: ["goal", "GOL", `${nm(e.pid)} ${TYPE[e.type]}${e.empty ? " (arco vacío)" : ""}`],
     atajada: ["save", "ATAJADA", `${e.type === "7m" ? "¡Atajó un 7 metros" : "Atajada"} de ${nm(e.gk)} a ${nm(e.pid)}`],
     fuera: ["minor", e.palo ? "PALO" : "AFUERA", `${e.palo ? "¡Al palo! Tiro" : "Tiro desviado"} de ${nm(e.pid)}`],
-    perdida: ["minor", "PÉRDIDA", `Pierde la pelota ${nm(e.pid)}${e.siete ? " con el arco vacío" : ""}`],
+    perdida: e.pasivo ? ["warn", "PASIVO", `Cobran juego pasivo${e.pid != null ? `: pierde la pelota ${nm(e.pid)}` : ""}`] : ["minor", "PÉRDIDA", `Pierde la pelota ${nm(e.pid)}${e.siete ? " con el arco vacío" : ""}`],
     excl: ["warn", "2 MIN", `Exclusión para ${nm(e.pid)}`],
     roja: ["red", "ROJA", `Descalificado ${nm(e.pid)}${e.third ? " (tercera exclusión)" : ""}`],
     lesion: ["red", "LESIÓN", `Se lesiona ${nm(e.pid)}`],
     tm: ["info", "MINUTO", `Tiempo muerto de ${esc(club(ci).n)}`],
+    duelo: e.res === "7m" ? ["warn", "1 VS 1", `${nm(e.pid)} le gana el mano a mano${e.d != null ? ` a ${nm(e.d)}` : ""} y le hacen falta: 7 metros`] : ["minor", "1 VS 1", `${e.d != null ? nm(e.d) : "La defensa"} le gana el mano a mano a ${nm(e.pid)}`],
+    pasivo: ["warn", "PASIVO", `El árbitro levanta el brazo: juego pasivo de ${esc(club(ci).n)}`],
+    aviso: ["info", "AYUDANTE", `Le ganan el mano a mano a ${nm(e.pid)} una y otra vez (${e.n}). ${e.by != null ? `${nm(e.by)} lo está encarando siempre.` : ""}`],
     cambio: ["info", "CAMBIO", e.swap ? `${nm(e.pid)} pasa a ${posShort(e.pos).toLowerCase()}` : `Entra ${nm(e.pid)}${e.out != null ? `, sale ${nm(e.out)}` : ""}`],
   };
   let [cls, tag, txt] = map[e.kind] || ["info", e.kind, ""];
   if (e.play && getPlay(e.play)) txt += ` <span class="ptag">${esc(getPlay(e.play).name)}</span>`;
   if (e.cg) txt += ` <span class="ptag">contragol</span>`;
+  if (e.duel !== undefined && (e.kind === "gol" || e.kind === "atajada")) txt += ` <span class="ptag duel">1 vs 1${e.duel != null ? ` ganado a ${esc(surname(P(e.duel)[0]))}` : ""}</span>`;
   return `<div class="feed-r k-${cls}"><span class="f-min">${e.m}'</span><span class="f-tag ${cls}">${tag}</span><span>${txt} <span class="muted sm">· ${tg}</span></span><span class="f-s">${e.kind === "gol" ? `${e.s[0]}–${e.s[1]}` : ""}</span></div>`;
 }
 function liveFeed(L, n) {
   const M = L.M, out = [`<div class="feed-r sys"><span class="f-min">0'</span><span class="f-tag info">INICIO</span><span>Arranca el partido.</span><span></span></div>`];
   let halfDone = false;
   for (const e of L.shown) {
-    if (L.feedMinor === false && ["fuera", "perdida", "cambio"].includes(e.kind) && !(e.kind === "cambio" && e.t === L.mine)) continue;
+    if (e.kind === "aviso" && e.t !== L.mine) continue;
+    if (L.feedMinor === false && ["fuera", "perdida", "cambio", "duelo"].includes(e.kind) && !(e.kind === "cambio" && e.t === L.mine) && !(e.kind === "duelo" && e.res === "7m")) continue;
     if (e.sec >= 1800 && !halfDone && M.ht) { halfDone = true; out.push(`<div class="feed-r sys"><span class="f-min">30'</span><span class="f-tag info">ENTRETIEMPO</span><span>Termina el primer tiempo.</span><span class="f-s">${M.ht[0]}–${M.ht[1]}</span></div>`); }
     out.push(evLine(e, M.home, M.away));
   }
@@ -3859,7 +3942,7 @@ function defPanel(pos) {
   const weak = !sw && defFit(att, sys, k) < defLevel(G.lineup) - 2.5;
   return defPanelBase(pos, cur) + `<div class="divider"></div><span class="h-sub">Cambio ataque-defensa</span>
     <p class="sm">${sw ? `En ataque juega <b>${esc(P(att)[0])}</b>; cuando hay que defender entra <b>${esc(P(cur)[0])}</b>.` : `<b>${esc(P(att)[0])}</b> ataca y defiende.`}${weak ? ` <span class="bad">Defiende poco: en este puesto la defensa pierde nivel.</span>` : ""}</p>
-    ${dsubAuto() ? `<p class="sm muted">Ahora los cambios los decide el ayudante. <button class="link sm" data-act="dsubman">Elegirlos yo</button></p>` : `<div class="cands">${cands.map(pid => `<button class="cand ${pid === cur ? "on" : ""}" data-dsub="${pos}" data-pid="${pid}"><span class="num-c">${P(pid)[7] || ""}</span><span class="bn">${esc(P(pid)[0])} <span class="muted sm">${P(pid)[2]} · defensa ${P(pid)[8][6]}</span></span><span class="med">${defFit(pid, sys, k)}</span></button>`).join("")}${sw ? `<button class="cand" data-dsub="${pos}" data-pid=""><span class="bn">Sin cambio (defiende el titular)</span><span class="med">${defFit(att, sys, k)}</span></button>` : ""}</div>`}
+    ${dsubAuto() ? `<p class="sm muted">Ahora los cambios los decide el ayudante. <button class="link sm" data-act="dsubman">Elegirlos yo</button></p>` : `<div class="cands">${cands.map(pid => `<button class="cand ${pid === cur ? "on" : ""}" data-dsub="${pos}" data-pid="${pid}"><span class="num-c">${P(pid)[7] || ""}</span><span class="bn">${esc(P(pid)[0])} <span class="muted sm">${P(pid)[2]} · defensa ${P(pid)[8][6]}</span></span><span class="med">${R(defFit(pid, sys, k))}</span></button>`).join("")}${sw ? `<button class="cand" data-dsub="${pos}" data-pid=""><span class="bn">Sin cambio (defiende el titular)</span><span class="med">${R(defFit(att, sys, k))}</span></button>` : ""}</div>`}
     <p class="muted sm">El cambio se hace en cada posesión, menos cuando el rival sale de contraataque: ahí no hay tiempo y defiende el que estaba.</p>`;
 }
 function defPanelBase(pos, pidD) {
@@ -3870,7 +3953,7 @@ function defPanelBase(pos, pidD) {
     <div class="droles">${Object.entries(DROLE).map(([v, [l, d]]) => `<button class="drole ${role === v ? "on" : ""}" data-drole="${k}" data-val="${v}"><b>${l}</b><span class="sm muted">${d}</span></button>`).join("")}</div>
     <div class="divider"></div>
     <span class="h-sub">Cambiar de puesto con</span>
-    <div class="cands">${ord.map((q, j) => j === k ? "" : `<button class="cand" data-dswap="${q}" data-from="${pos}"><span class="num-c">${j + 1}</span><span class="bn">${esc(P(defCourt()[q])[0])} <span class="muted sm">${esc(DNAMES[sys][j])}</span></span><span class="med">${defFit(pid, sys, j)}</span></button>`).join("")}</div>
+    <div class="cands">${ord.map((q, j) => j === k ? "" : `<button class="cand" data-dswap="${q}" data-from="${pos}"><span class="num-c">${j + 1}</span><span class="bn">${esc(P(defCourt()[q])[0])} <span class="muted sm">${esc(DNAMES[sys][j])}</span></span><span class="med">${R(defFit(pid, sys, j))}</span></button>`).join("")}</div>
     <p class="muted sm">El número de la derecha es cómo rendiría ${esc(surname(P(pid)[0]))} en ese otro puesto. Para cambiar al jugador por un suplente, pasá a la vista de Ataque.</p>`;
 }
 function courtSVG() {
@@ -3891,7 +3974,7 @@ function vTactics() {
   const tokens = POS_ORDER.map(pos => {
     const dc = UI.mode === "defensa" ? (UI._dc || (UI._dc = defCourt())) : null, pid = dc ? dc[pos] : lu[pos], p = P(pid), [x, y] = tokenPos(pos), on = UI.sel === pos && UI.benchSel == null, out = p[2] !== pos, swd = dc && pid !== lu[pos];
     return `<button class="tok ${on ? "on" : ""} ${pos === "AR" ? "gk" : ""} ${swd ? "swd" : ""}" style="left:${x / 5.6}%;top:${y / 5.6}%" data-tok="${pos}" aria-label="${POS_NAME[pos]}: ${esc(p[0])}">
-      <span class="tok-c">${p[7] || pos}</span><span class="tok-n">${esc(surname(p[0]))}${out && UI.mode === "ataque" ? ' <i class="warn-dot" title="fuera de puesto"></i>' : ""}</span>${UI.mode === "defensa" && pos !== "AR" ? (() => { const k = defOrder().indexOf(pos), r = defRole(G.tac.def, k); return `<span class="tok-r r-${r}">${r === "ant" ? "Anticipa" : r === "blo" ? "Bloquea" : defFit(pid, G.tac.def, k)}</span>`; })() : ""}${condOf(pid) < 100 ? `<span class="tok-e">${condBar(pid)}</span>` : ""}</button>`;
+      <span class="tok-c">${p[7] || pos}</span><span class="tok-n">${esc(surname(p[0]))}${out && UI.mode === "ataque" ? ' <i class="warn-dot" title="fuera de puesto"></i>' : ""}</span>${UI.mode === "defensa" && pos !== "AR" ? (() => { const k = defOrder().indexOf(pos), r = defRole(G.tac.def, k); return `<span class="tok-r r-${r}">${r === "ant" ? "Anticipa" : r === "blo" ? "Bloquea" : R(defFit(pid, G.tac.def, k))}</span>`; })() : ""}${condOf(pid) < 100 ? `<span class="tok-e">${condBar(pid)}</span>` : ""}</button>`;
   }).join("");
   UI._dc = null;
   const sysBtns = ["6-0", "5-1", "3-2-1"].map(s => `<button class="sys ${G.tac.def === s ? "on" : ""}" data-tac="def" data-val="${s}">${s.replace(/-/g, ":")}</button>`).join("");
@@ -3899,7 +3982,7 @@ function vTactics() {
   const starters = new Set(POS_ORDER.map(p => lu[p]));
   const bench = ROSTER[G.myClub].filter(pid => !starters.has(pid)).sort((a, b) => POS_ORDER.indexOf(P(a)[2]) - POS_ORDER.indexOf(P(b)[2]) || P(b)[3] - P(a)[3]);
   const conv = squadBench(), convS = new Set(conv); bench.sort((a, b) => (convS.has(b) ? 1 : 0) - (convS.has(a) ? 1 : 0));
-  const benchHTML = bench.map((pid, i) => { const p = P(pid), na = isInj(pid) || isSusp(pid), cv = convS.has(pid); return `${i === conv.length && !cv ? '<div class="bench-sep">NO CONVOCADOS</div>' : ""}<button class="bench-r ${UI.benchSel === pid ? "on" : ""} ${na ? "na" : ""} ${cv ? "" : "nc"}" data-bench="${pid}">${na ? "" : `<span class="conv ${cv ? "on" : ""}" data-conv="${pid}" title="${cv ? "Sacar de la convocatoria" : "Convocar"}">${cv ? "✓" : "+"}</span>`}<span class="num-c">${p[7] || ""}</span><span class="bn">${esc(p[0])}${na ? `<br>${statusTag(pid)}` : condOf(pid) < 100 ? `<br>${condBar(pid)}` : ""}</span><span class="muted sm">${p[2]}</span><span class="med">${p[3]}</span></button>`; }).join("");
+  const benchHTML = bench.map((pid, i) => { const p = P(pid), na = isInj(pid) || isSusp(pid), cv = convS.has(pid); return `${i === conv.length && !cv ? '<div class="bench-sep">NO CONVOCADOS</div>' : ""}<button class="bench-r ${UI.benchSel === pid ? "on" : ""} ${na ? "na" : ""} ${cv ? "" : "nc"}" data-bench="${pid}">${na ? "" : `<span class="conv ${cv ? "on" : ""}" data-conv="${pid}" title="${cv ? "Sacar de la convocatoria" : "Convocar"}">${cv ? "✓" : "+"}</span>`}<span class="num-c">${p[7] || ""}</span><span class="bn">${esc(p[0])}${na ? `<br>${statusTag(pid)}` : condOf(pid) < 100 ? `<br>${condBar(pid)}` : ""}</span><span class="muted sm">${p[2]}</span><span class="med">${R(p[3])}</span></button>`; }).join("");
   const nm = nextMatch(); let tip = "";
   if (nm) {
     const riv = nm.h === G.myClub ? nm.a : nm.h, rep = rivalReport(riv), shP = P(rep.shooter), pv = P(rep.pivot);
@@ -3910,13 +3993,13 @@ function vTactics() {
   return `<div class="tactics">
     <section class="t-main">
       <div class="t-head">
-        <p class="muted">${UI.benchSel != null ? `<b class="txt">${esc(P(UI.benchSel)[0])}</b> elegido: tocá en la cancha a quién reemplaza.` : UI.mode === "defensa" ? `Así se para el equipo en la ${G.tac.def.replace(/-/g, ":")}. Arrastrá una ficha sobre otra para cambiar puestos y tocá un jugador para darle un rol. <button class="link sm" data-act="defauto">Ordenar según aptitud</button><br>Nivel de la defensa: <b>${defLevel(defCourt()).toFixed(1)}</b>${Object.keys(dsubValid()).length ? ` (sin los cambios ataque-defensa sería ${defLevel(G.lineup).toFixed(1)})` : ""}. Cambios ataque-defensa: <span class="toggle sm-t"><button class="${dsubAuto() ? "on" : ""}" data-act="dsubauto">Los decide el ayudante</button><button class="${dsubAuto() ? "" : "on"}" data-act="dsubman">Los elijo yo</button></span>` : "Arrastrá una ficha sobre otra para cambiarlas de lugar, o un suplente del banco sobre un titular."}</p>
+        <p class="muted">${UI.benchSel != null ? `<b class="txt">${esc(P(UI.benchSel)[0])}</b> elegido: tocá en la cancha a quién reemplaza.` : UI.mode === "defensa" ? `Así se para el equipo en la ${G.tac.def.replace(/-/g, ":")}. Arrastrá una ficha sobre otra para cambiar puestos y tocá un jugador para darle un rol. <button class="link sm" data-act="defauto">Ordenar según aptitud</button><br>Nivel de la defensa: <b>${R(defLevel(defCourt()))}</b>${Object.keys(dsubValid()).length ? ` (sin los cambios ataque-defensa sería ${R(defLevel(G.lineup))})` : ""}. Cambios ataque-defensa: <span class="toggle sm-t"><button class="${dsubAuto() ? "on" : ""}" data-act="dsubauto">Los decide el ayudante</button><button class="${dsubAuto() ? "" : "on"}" data-act="dsubman">Los elijo yo</button></span>` : "Arrastrá una ficha sobre otra para cambiarlas de lugar, o un suplente del banco sobre un titular."}</p>
         <div class="toggle" role="group" aria-label="Fase"><button class="${UI.mode === "ataque" ? "on" : ""}" data-mode="ataque">Ataque</button><button class="${UI.mode === "defensa" ? "on" : ""}" data-mode="defensa">Defensa</button></div>
         <button class="btn ad-btn ${UI.adOpen ? "on" : ""}" data-act="adopen">⇄ Cambios ataque-defensa${Object.keys(dsubValid()).length ? ` <span class="ad-n">${Object.keys(dsubValid()).length}</span>` : ""}</button>
         ${UI.mode === "defensa" ? `<div class="toggle" role="group" aria-label="Sistema defensivo">${["6-0", "5-1", "3-2-1"].map(x => `<button class="${G.tac.def === x ? "on" : ""}" data-tac="def" data-val="${x}">${x.replace(/-/g, ":")}</button>`).join("")}</div>` : ""}
       </div>
       <div class="t-controls info"><span>Defensa <b>${G.tac.def.replace(/-/g, ":")}</b></span><span>Ataque <b>${{ lento: "paciente", normal: "equilibrado", rapido: "vertical" }[G.tac.ritmo]}</b></span><span>7 contra 6 <b>${{ nunca: "nunca", perdiendo: "si perdemos", siempre: "siempre" }[G.tac.siete]}</b></span><span>Jugadas activas <b>${(G.activePlays || []).length}</b></span><button class="link sm" data-go="model">Cambiar en Modelo de juego ›</button></div>
-      ${UI.adOpen ? adPanelHTML() : ""}
+      ${UI.adOpen ? `<div class="ad-back" data-act="adopen"></div>${adPanelHTML()}` : ""}
       <div class="t-court-row">
         <div class="court ${UI.benchSel != null ? "awaiting" : ""}">${courtSVG()}<span class="court-note">${UI.mode === "ataque" ? "ATAQUE 3:3" : "DEFENSA " + G.tac.def.replace(/-/g, ":")}</span>${tokens}</div>
         <div class="t-side">
@@ -3943,13 +4026,13 @@ function adPanelHTML() {
     const weak = fitA < defLevel(G.lineup) - 2.5;
     return `<div class="ad-row">
       <span class="ad-pos">${POS_NAME[pos]}<span class="muted sm">${esc(DNAMES[sys][k])}</span></span>
-      <span class="ad-p atk"><i></i><b>${esc(surname(P(att)[0]))}</b><span class="sm muted">ataque ${P(att)[3]} · defensa ${fitA}</span></span>
+      <span class="ad-p atk"><i></i><b>${esc(surname(P(att)[0]))}</b><span class="sm muted">ataque ${R(P(att)[3])} · defensa ${fitA}</span></span>
       <span class="ad-arrow">→</span>
-      <span class="ad-opts"><button class="ad-o ${cur == null ? "on" : ""}" data-dsub="${pos}" data-pid=""><i class="t"></i>Defiende él${weak ? ' <span class="bad">(débil)</span>' : ""}</button>${opts.map(pid => `<button class="ad-o def ${cur === pid ? "on" : ""}" data-dsub="${pos}" data-pid="${pid}"><i></i>${esc(surname(P(pid)[0]))} <b>${defFit(pid, sys, k)}</b></button>`).join("")}</span>
+      <span class="ad-opts"><button class="ad-o ${cur == null ? "on" : ""}" data-dsub="${pos}" data-pid=""><i class="t"></i>Defiende él${weak ? ' <span class="bad">(débil)</span>' : ""}</button>${opts.map(pid => `<button class="ad-o def ${cur === pid ? "on" : ""}" data-dsub="${pos}" data-pid="${pid}"><i></i>${esc(surname(P(pid)[0]))} <b>${R(defFit(pid, sys, k))}</b></button>`).join("")}</span>
     </div>`;
   };
-  return `<section class="card ad-panel"><div class="row-between"><span class="kicker">CAMBIOS ATAQUE-DEFENSA · ${sys.replace(/-/g, ":")}</span><span class="toggle sm-t"><button class="${dsubAuto() ? "on" : ""}" data-act="dsubauto">Los decide el ayudante</button><button class="${dsubAuto() ? "" : "on"}" data-act="dsubman">Los elijo yo</button></span></div>
-    <p class="sm muted"><span class="lg-dot atk"></span> titular que ataca · <span class="lg-dot def"></span> entra solo a defender. El número es cómo rinde defendiendo en ese puesto. Nivel de la defensa: <b>${defLevel(defCourt()).toFixed(1)}</b>${Object.keys(d).length ? ` (sin cambios ${defLevel(G.lineup).toFixed(1)})` : ""}.</p>
+  return `<section class="card ad-panel"><div class="row-between"><span class="kicker">CAMBIOS ATAQUE-DEFENSA · ${sys.replace(/-/g, ":")}</span><span class="ad-close-w"><span class="toggle sm-t"><button class="${dsubAuto() ? "on" : ""}" data-act="dsubauto">Los decide el ayudante</button><button class="${dsubAuto() ? "" : "on"}" data-act="dsubman">Los elijo yo</button></span><button class="btn ghost ad-x" data-act="adopen">Listo</button></span></div>
+    <p class="sm muted"><span class="lg-dot atk"></span> titular que ataca · <span class="lg-dot def"></span> entra solo a defender. El número es cómo rinde defendiendo en ese puesto. Nivel de la defensa: <b>${R(defLevel(defCourt()))}</b>${Object.keys(d).length ? ` (sin cambios ${R(defLevel(G.lineup))})` : ""}.</p>
     ${dsubAuto() ? `<p class="sm">Ahora decide el ayudante${Object.keys(d).length ? `: ${Object.entries(d).map(([p, pid]) => `${esc(surname(P(pid)[0]))} defiende por ${esc(surname(P(G.lineup[p])[0]))}`).join(", ")}.` : " y no hace cambios."} Si tocás una opción, pasás a elegirlos vos.</p>` : ""}
     <div class="ad-list">${field.map(row).join("")}</div>
     <p class="sm muted">El cambio se hace en cada posesión, menos cuando el rival sale de contraataque: ahí defiende el que estaba en cancha. En el partido en vivo podés activarlos o desactivarlos.</p></section>`;
@@ -3963,11 +4046,11 @@ function markHTML() {
 function playerHead(pid, posLabel, ratingNote) {
   const p = P(pid);
   return `<div class="ph"><div class="ph-face">${faceSVG(pid)}<span class="ph-badge">${p[7] || p[2]}</span></div><div class="ph-t"><span class="ph-n">${esc(p[0])}</span><span class="muted">${posLabel} · ${p[6] ? "zurdo" : "diestro"} · ${age(pid)} años · ${esc(p[5])}</span></div>
-    <div class="ph-m"><span class="ph-med">${ratingNote != null ? ratingNote : p[3]}</span><span class="kicker">MEDIA</span></div></div>`;
+    <div class="ph-m"><span class="ph-med">${ratingNote != null ? R(ratingNote) : R(p[3])}</span><span class="kicker">MEDIA</span></div></div>`;
 }
 function attrGrid(pid) {
   const p = P(pid), names = p[2] === "AR" ? GK_ATTR : FIELD_ATTR;
-  return `<div class="attr-grid">${p[8].map((v, i) => `<div class="attr"><div class="row-between sm"><span class="muted">${names[i]}</span><b>${v}</b></div><div class="bar"><i style="width:${v * 5}%;background:${v >= 15 ? "var(--green)" : v >= 10 ? "var(--accent)" : "var(--red)"}"></i></div></div>`).join("")}</div>`;
+  return `<div class="attr-grid">${p[8].map((v, i) => `<div class="attr"><div class="row-between sm"><span class="muted">${names[i]}</span><b>${R(v)}</b></div><div class="bar"><i style="width:${R(v)}%;background:${v >= 15 ? "var(--green)" : v >= 10 ? "var(--accent)" : "var(--red)"}"></i></div></div>`).join("")}</div>`;
 }
 function seasonLine(pid) {
   const s = G.S.stats[pid]; if (!s || !s.pj) return '<p class="muted sm">Todavía no jugó esta temporada.</p>';
@@ -3982,10 +4065,10 @@ function slotPanel(pos) {
     ${attrGrid(pid)}${seasonLine(pid)}
     <p class="sm">Estado físico: ${condBar(pid, true)} <b>${condOf(pid)}%</b></p>
     ${pos !== "AR" ? `<div class="instr"><span class="sm muted">Al tiro</span>${[["menos", "Que tire menos"], ["normal", "Normal"], ["mas", "Que tire más"]].map(([v, l]) => `<button class="chip ${ins === v ? "on" : ""}" data-instr="${pid}" data-val="${v}">${l}</button>`).join("")}</div>` : ""}
-    ${out ? `<div class="note"><span class="note-i">!</span><p>Juega fuera de su puesto: rinde ${p[3] - r} puntos menos de su media.</p></div>` : ""}
+    ${out ? `<div class="note"><span class="note-i">!</span><p>Juega fuera de su puesto: rinde ${R(p[3]) - R(r)} puntos menos de su media.</p></div>` : ""}
     <div class="divider"></div>
     <span class="h-sub">Cambiar por</span>
-    <div class="cands">${cands.map(c => { const q = P(c), rr = ratingAt(DB, c, pos); return `<button class="cand" data-swap="${pos}" data-pid="${c}"><span class="num-c">${q[7] || ""}</span><span class="bn">${esc(q[0])} <span class="muted sm">${q[2]}${starters.has(c) ? " · titular" : ""}</span></span><span class="med ${rr < q[3] ? "warn" : ""}">${rr}</span></button>`; }).join("")}</div>
+    <div class="cands">${cands.map(c => { const q = P(c), rr = ratingAt(DB, c, pos); return `<button class="cand" data-swap="${pos}" data-pid="${c}"><span class="num-c">${q[7] || ""}</span><span class="bn">${esc(q[0])} <span class="muted sm">${q[2]}${starters.has(c) ? " · titular" : ""}</span></span><span class="med ${rr < q[3] ? "warn" : ""}">${R(rr)}</span></button>`; }).join("")}</div>
     <p class="muted sm">El número de la derecha es cómo rendiría en el puesto de ${posShort(pos).toLowerCase()}. Si elegís a un titular, intercambian lugares.</p>`;
 }
 function benchPanel(pid) {
@@ -3994,7 +4077,7 @@ function benchPanel(pid) {
   const best = POS_ORDER.slice().sort((a, b) => ratingAt(DB, pid, b) - ratingAt(DB, pid, a));
   return `${playerHead(pid, posShort(p[2]) + " · suplente")}${attrGrid(pid)}${seasonLine(pid)}
     <div class="divider"></div><span class="h-sub">Mandarlo a la cancha en lugar de</span>
-    <div class="cands">${best.map(pos => { const s = G.lineup[pos], rr = ratingAt(DB, pid, pos); return `<button class="cand" data-swap="${pos}" data-pid="${pid}"><span class="num-c">${pos}</span><span class="bn">${esc(P(s)[0])} <span class="muted sm">${posShort(pos).toLowerCase()} · ${ratingAt(DB, s, pos)}</span></span><span class="med ${rr < p[3] ? "warn" : ""}">${rr}</span></button>`; }).join("")}</div>
+    <div class="cands">${best.map(pos => { const s = G.lineup[pos], rr = ratingAt(DB, pid, pos); return `<button class="cand" data-swap="${pos}" data-pid="${pid}"><span class="num-c">${pos}</span><span class="bn">${esc(P(s)[0])} <span class="muted sm">${posShort(pos).toLowerCase()} · ${ratingAt(DB, s, pos)}</span></span><span class="med ${rr < p[3] ? "warn" : ""}">${R(rr)}</span></button>`; }).join("")}</div>
     <button class="link" data-act="unbench">Cancelar</button>`;
 }
 
@@ -4018,12 +4101,12 @@ function vSquad() {
   if (UI.plPick == null || P(UI.plPick)[1] !== G.myClub) UI.plPick = G.lineup.CE;
   const rows = list.map(pid => {
     const p = P(pid), s = G.S.stats[pid] || { pj: 0, g: 0, t: 0, sv: 0, sf: 0 };
-    return `<tr class="click ${UI.plPick === pid ? "sel" : ""}" data-pl="${pid}"><td class="num">${p[7] || ""}</td><td class="tl"><div class="pn"><span class="face-s">${faceSVG(pid)}</span><div><div class="pn"><b>${esc(p[0])}</b>${starters.has(pid) ? '<span class="tag">TITULAR</span>' : ""}</div><span class="muted sm">${esc(p[5])}</span></div></div></td><td>${p[2]}</td><td>${p[6] ? "Zurda" : "Diestra"}</td><td>${age(pid)}</td><td><span class="med">${p[3]}</span></td><td class="tl">${statusTag(pid) || condBar(pid, true)}</td><td>${s.pj}</td><td>${p[2] === "AR" ? `${s.sv} <span class="muted">(${pct(s.sv, s.sf)})</span>` : `${s.g} <span class="muted">(${pct(s.g, s.t)})</span>`}</td></tr>`;
+    return `<tr class="click ${UI.plPick === pid ? "sel" : ""}" data-pl="${pid}"><td class="num">${p[7] || ""}</td><td class="tl"><div class="pn"><span class="face-s">${faceSVG(pid)}</span><div><div class="pn"><b>${esc(p[0])}</b>${starters.has(pid) ? '<span class="tag">TITULAR</span>' : ""}</div><span class="muted sm">${esc(p[5])}</span></div></div></td><td>${p[2]}</td><td>${p[6] ? "Zurda" : "Diestra"}</td><td>${age(pid)}</td><td><span class="med">${R(p[3])}</span></td><td class="tl">${statusTag(pid) || condBar(pid, true)}</td><td>${s.pj}</td><td>${p[2] === "AR" ? `${s.sv} <span class="muted">(${pct(s.sv, s.sf)})</span>` : `${s.g} <span class="muted">(${pct(s.g, s.t)})</span>`}</td></tr>`;
   }).join("");
   const depth = POS_ORDER.map(pos => {
     const nat = all.filter(pid => P(pid)[2] === pos).sort((a, b) => P(b)[3] - P(a)[3]);
     const note = nat.length === 0 ? '<span class="bad">sin jugadores</span>' : nat.length === 1 ? '<span class="warn">uno solo</span>' : `${nat.length} jugadores`;
-    return `<div class="depth"><span class="d-pos">${pos}</span><span class="dots">${nat.map(pid => `<i class="${starters.has(pid) ? "on" : ""}" title="${esc(P(pid)[0])} (${P(pid)[3]})"></i>`).join("")}</span><span class="sm muted">${note}${nat[0] ? ` · mejor: ${esc(surname(P(nat[0])[0]))} ${P(nat[0])[3]}` : ""}</span></div>`;
+    return `<div class="depth"><span class="d-pos">${pos}</span><span class="dots">${nat.map(pid => `<i class="${starters.has(pid) ? "on" : ""}" title="${esc(P(pid)[0])} (${R(P(pid)[3])})"></i>`).join("")}</span><span class="sm muted">${note}${nat[0] ? ` · mejor: ${esc(surname(P(nat[0])[0]))} ${R(P(nat[0])[3])}` : ""}</span></div>`;
   }).join("");
   return `<div class="squad">
     <section class="sq-main">
@@ -4050,11 +4133,12 @@ function vMatch() {
   return postTalkHTML(m) + vMatchBody(m);
 }
 function vMatchBody(m) {
-  const tot = side => { const ids = Object.keys(m.box).map(Number).filter(pid => P(pid)[1] === side); let g = 0, t = 0, sv = 0, sf = 0; ids.forEach(pid => { const b = m.box[pid]; g += b.g; t += b.t; sv += b.sv; sf += b.sf; }); return { g, t, sv, sf, ids }; };
+  const tot = side => { const ids = Object.keys(m.box).map(Number).filter(pid => P(pid)[1] === side); let g = 0, t = 0, sv = 0, sf = 0, dw = 0, dt = 0; ids.forEach(pid => { const b = m.box[pid]; g += b.g; t += b.t; sv += b.sv; sf += b.sf; dw += b.dw || 0; dt += (b.dw || 0) + (b.dl || 0); }); return { g, t, sv, sf, dw, dt, ids }; };
   const H = tot(m.h), A = tot(m.a);
   const evs = m.events || [], byType = (ti, type) => evs.filter(e => e.kind === "gol" && e.t === ti && e.type === type).length, cnt = (ti, k) => evs.filter(e => e.kind === k && e.t === ti).length;
   const statRows = [
     ["Goles", H.g, A.g], ["Tiros", H.t, A.t], ["Efectividad", pct(H.g, H.t), pct(A.g, A.t)], ["Atajadas", H.sv, A.sv],
+    ["Mano a mano ganados", `${H.dw}/${H.dt}`, `${A.dw}/${A.dt}`], ["Pasivos cobrados", evs.filter(e => e.kind === "perdida" && e.pasivo && e.t === 0).length, evs.filter(e => e.kind === "perdida" && e.pasivo && e.t === 1).length],
     ["Goles de 9 m", byType(0, "9m"), byType(1, "9m")], ["Goles de 6 m y penetración", byType(0, "6m") + byType(0, "pen"), byType(1, "6m") + byType(1, "pen")],
     ["Goles de extremo", byType(0, "ext"), byType(1, "ext")], ["Contraataques", byType(0, "contra"), byType(1, "contra")], ["Goles de 7 m", byType(0, "7m"), byType(1, "7m")],
     ["Pérdidas", cnt(0, "perdida"), cnt(1, "perdida")], ["Exclusiones de 2'", cnt(0, "excl") + cnt(0, "roja"), cnt(1, "excl") + cnt(1, "roja")], ["Tiempos muertos", cnt(0, "tm"), cnt(1, "tm")],
@@ -4212,7 +4296,7 @@ function vOffice() {
   const col = c >= 60 ? "var(--green)" : c >= 35 ? "#e0b44a" : "#e05a4f";
   const say = G.fired ? "Ya no sos el entrenador del club." : !lg.round ? "La temporada todavía no arrancó. Te esperamos con expectativa." : pos <= tg ? `Vamos ${pos}.º y el objetivo es ${esc(G.obj.text.toLowerCase())}. Así vamos bien.` : pos <= tg + 3 ? `Vamos ${pos}.º. Estamos cerca del objetivo, pero hay que apretar.` : `Vamos ${pos}.º, lejos de lo que pedimos (${esc(G.obj.text.toLowerCase())}). Esto tiene que cambiar.`;
   const offers = (G.jobOffers || []).map(o => { const ci = o.ci, L = LEAGUES[G.clubLeague[ci]];
-    return `<div class="job">${badge(ci, 44)}<div class="job-t"><b>${esc(club(ci).n)}</b><span class="muted sm">${esc(L.name)} · ${esc(L.country)} · media ${strength(ci).toFixed(1)}</span><span class="sm">${stars(club(ci).v || 1)}</span></div><button class="btn" data-job="${ci}">Firmar</button></div>`; }).join("");
+    return `<div class="job">${badge(ci, 44)}<div class="job-t"><b>${esc(club(ci).n)}</b><span class="muted sm">${esc(L.name)} · ${esc(L.country)} · media ${R(strength(ci))}</span><span class="sm">${stars(club(ci).v || 1)}</span></div><button class="btn" data-job="${ci}">Firmar</button></div>`; }).join("");
   const hist = G.history.slice().reverse().map(h => `<tr><td>${seasonLabel(h.season)}</td><td class="tl">${h.club != null ? `${badge(h.club, 18)} ${esc(club(h.club).n)}` : "—"}</td><td class="muted">${esc(LEAGUES[h.lg] ? LEAGUES[h.lg].name : "")}</td><td>${h.fired ? `<span class="bad">Despedido (fecha ${h.fired})</span>` : h.pos + ".º"}</td><td class="${h.ok ? "ok" : "bad"}">${h.fired ? "—" : h.ok ? "Cumplido" : "No"}</td><td class="muted">${h.cl || "—"}</td></tr>`).join("");
   const filled = [1, 2, 3].map(n => n === SLOT ? G : load(n));
   return `<div class="office">
@@ -4263,7 +4347,7 @@ function vEnd() {
     ${G.fired ? `<p class="big-note bad">La directiva decidió no seguir con vos. Elegí tu próximo club en el despacho.</p><button class="btn big" data-go="office">Ir al despacho</button>` : `${(G.jobOffers || []).length ? `<p class="sm">Te llegaron ${G.jobOffers.length} propuestas de otros clubes. <button class="link" data-go="office">Verlas en el despacho</button></p>` : ""}<button class="btn big" data-act="next">Empezar la temporada ${seasonLabel(G.season + 1)}</button>`}
   </section>
   ${G.fin ? (() => { const exp = ROSTER[G.myClub].filter(pid => contractOf(pid) <= G.season && G.loans[pid] == null); const lo = ROSTER[G.myClub].filter(pid => G.loans[pid] != null);
-    return exp.length || lo.length ? `<section class="card" style="margin-top:16px"><span class="kicker">ANTES DE EMPEZAR LA PRÓXIMA TEMPORADA</span>${exp.length ? `<p class="sm">Terminan contrato y se van libres si no los renovás:</p>${exp.map(pid => `<div class="kv"><span>${esc(P(pid)[0])} · ${P(pid)[2]} · media ${P(pid)[3]} · ${age(pid)} años</span><button class="chip" data-act="renew" data-pid="${pid}">Renovar</button></div>`).join("")}` : ""}${lo.length ? `<p class="sm muted">Vuelven a su club tras el préstamo: ${lo.map(pid => esc(P(pid)[0])).join(", ")}.</p>` : ""}</section>` : ""; })() : ""}
+    return exp.length || lo.length ? `<section class="card" style="margin-top:16px"><span class="kicker">ANTES DE EMPEZAR LA PRÓXIMA TEMPORADA</span>${exp.length ? `<p class="sm">Terminan contrato y se van libres si no los renovás:</p>${exp.map(pid => `<div class="kv"><span>${esc(P(pid)[0])} · ${P(pid)[2]} · media ${R(P(pid)[3])} · ${age(pid)} años</span><button class="chip" data-act="renew" data-pid="${pid}">Renovar</button></div>`).join("")}` : ""}${lo.length ? `<p class="sm muted">Vuelven a su club tras el préstamo: ${lo.map(pid => esc(P(pid)[0])).join(", ")}.</p>` : ""}</section>` : ""; })() : ""}
   <div class="three">${["arg1", "esp1", "ger1"].map(block).join("")}</div>
   <p class="muted sm">Las segundas divisiones no tienen descensos todavía porque no cargamos las terceras.</p>`;
 }
@@ -4288,7 +4372,7 @@ function renderStart() {
   } else {
     const cl = DB.clubs.map((x, i) => i).filter(i => DB.clubs[i].l === lgId).sort((a, b) => strength(b) - strength(a));
     content = `<button class="link" data-pick="">‹ Volver a las ligas</button><h2>${esc(LEAGUES[lgId].name)} · elegí tu club</h2>
-    <div class="clublist">${cl.map(ci => `<button class="clubrow" data-club="${ci}">${badge(ci, 40)}<span class="cn"><b>${esc(club(ci).n)}</b><span class="muted sm">${esc(club(ci).c || LEAGUES[lgId].country)}${club(ci).s ? " · " + esc(club(ci).s) : ""}</span></span><span class="st">${stars(club(ci).v)}</span><span class="sm muted">Media ${strength(ci).toFixed(1)}</span></button>`).join("")}</div>`;
+    <div class="clublist">${cl.map(ci => `<button class="clubrow" data-club="${ci}">${badge(ci, 40)}<span class="cn"><b>${esc(club(ci).n)}</b><span class="muted sm">${esc(club(ci).c || LEAGUES[lgId].country)}${club(ci).s ? " · " + esc(club(ci).s) : ""}</span></span><span class="st">${stars(club(ci).v)}</span><span class="sm muted">Media ${R(strength(ci))}</span></button>`).join("")}</div>`;
   }
   $app().innerHTML = `${BGFX}<div class="start"><div class="logo">HANDBALL <b>DT</b></div><p class="muted">Elegí un club, firmá el contrato y hacete cargo del equipo día por día.</p>
   ${slotHTML}<p class="kicker" style="margin-top:22px">NUEVA PARTIDA EN LA RANURA ${UI.newSlot}</p>
