@@ -738,6 +738,10 @@ html,body{background:#0A1015}
 .replog{margin-top:8px}
 .cs-row input{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:inherit}
 .cup-top select{width:auto}
+/* cambios ataque-defensa */
+.tok.swd::after{content:"⇄";position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;background:#3b82f6;color:#fff;font-size:11px;line-height:18px;text-align:center;font-weight:700}
+.toggle.sm-t{display:inline-flex;vertical-align:middle;margin-left:4px}.toggle.sm-t button{padding:4px 10px;font-size:12px;min-height:0}
+.cs-top{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 18px;border-radius:8px;background:rgba(255,138,61,.12);border:1px solid rgba(255,138,61,.35)}.cs-top p{margin:0}
 
 </style>
 </head>
@@ -860,7 +864,8 @@ function newMatch(DB, home, away, cfgH, cfgA, wantBox) {
     const avail = ROSTER[club].filter(pid => !out.has(pid));
     const en = {}; avail.forEach(pid => en[pid] = cfg.cond && cfg.cond[pid] != null ? cfg.cond[pid] : 100);
     return { club, tac: { def: "6-0", ritmo: "normal", bonus: 0, siete: "nunca", mark: null, ...(cfg.tac || {}) }, instr: cfg.instr || {}, manual: !!cfg.manual, mor: cfg.mor || null, injMult: cfg.injMult || 1,
-      court: lu, start: { ...lu }, avail, en, excl: [], two: {}, red: [], inj: [], boost: 0, tms: 0, run: 0, siete: false };
+      court: lu, start: { ...lu }, avail, en, excl: [], two: {}, red: [], inj: [], boost: 0, tms: 0, run: 0, siete: false,
+      dsub: cfg.dsub ? { ...cfg.dsub } : aiDsub(DB, lu, avail), swOut: {} };
   };
   const M = { home, away, sides: [mk(home, cfgH), mk(away, cfgA)], score: [0, 0], ht: null, i: 0, contra: [false, false], empty: [false, false], conceded: [false, false], playUses: [{}, {}], events: [], box: {}, wantBox: !!wantBox, done: false };
   M.nAtt = Math.round(55 + (RITMO[M.sides[0].tac.ritmo] + RITMO[M.sides[1].tac.ritmo]) * 0.75 + (rnd() * 6 - 3));
@@ -885,10 +890,41 @@ function defRoles(S) {
   ord.forEach((p, k) => { if (S.court[p] == null || isExcl(S, p)) return; if (r[k] === "ant") { out.nA++; out.ant.add(p); } else if (r[k] === "blo") out.nB++; });
   return out;
 }
+// cambios ataque-defensa: el especialista entra a defender en lugar del atacante y sale cuando su equipo recupera.
+// En una transición rápida (contraataque) no hay tiempo de hacer el cambio.
+function aiDsub(DB, lu, avail) {
+  const on = new Set(Object.values(lu)), field = POS_ORDER.filter(p => p !== "AR" && lu[p] != null), d = p => DB.players[lu[p]][8][6];
+  const med = field.map(d).sort((a, b) => a - b)[Math.floor(field.length / 2)] || 10, out = {}, used = new Set();
+  const bench = avail.filter(pid => !on.has(pid) && DB.players[pid][2] !== "AR").sort((a, b) => DB.players[b][8][6] - DB.players[a][8][6]);
+  for (const p of field.sort((a, b) => d(a) - d(b))) {
+    if (Object.keys(out).length >= 2 || d(p) > med - 3) break;
+    const sp = bench.find(pid => !used.has(pid) && DB.players[pid][8][6] >= d(p) + 4);
+    if (sp != null) { out[p] = sp; used.add(sp); }
+  }
+  return out;
+}
+function phaseSwap(M, ti, phase) {
+  const S = M.sides[ti]; if (!S.dsub) return;
+  for (const pos in S.dsub) {
+    if (isExcl(S, pos)) continue;
+    const sp = S.dsub[pos], cur = S.court[pos];
+    if (phase === "def") {
+      if (S.swOut[pos] != null || cur == null || cur === sp) continue;
+      if (onCourtSet(S).has(sp) || S.red.includes(sp) || S.inj.includes(sp) || !S.avail.includes(sp) || S.en[sp] < 35) continue;
+      S.swOut[pos] = cur; S.court[pos] = sp;
+    } else {
+      const back = S.swOut[pos]; if (back == null) continue;
+      delete S.swOut[pos];
+      if (cur !== sp || onCourtSet(S).has(back) || S.red.includes(back) || S.inj.includes(back)) continue;
+      S.court[pos] = back;
+    }
+  }
+}
+const defAttrs = (DB, S, pid) => { const f = energyF(S.en[pid]) * ((S.mor && S.mor[pid]) || 1); return DB.players[pid][8].map(v => v * f); };
 function teamVals(DB, S) {
   let def = 0, pase = 0, k = 0; const dir = roleOf(S, "director"), ord = defOrd(S), at = DSLOT_ATTR[S.tac.def] || DSLOT_ATTR["6-0"];
   for (const p of fieldOn(S)) { const a = attrs(DB, S, S.court[p], p), w = S.court[p] === dir ? 3 : p === "CE" ? 2 : 1; pase += a[4] * w; k += w; }
-  ord.forEach((p, i) => { if (S.court[p] == null || isExcl(S, p)) return; const a = attrs(DB, S, S.court[p], p); def += a[6] * 0.62 + a[at[i]] * 0.38; });
+  ord.forEach((p, i) => { if (S.court[p] == null || isExcl(S, p)) return; const a = defAttrs(DB, S, S.court[p]); def += a[6] * 0.62 + a[at[i]] * 0.38; });
   return { def: def / 6, pase: k ? pase / k : 5 };
 }
 function benchFor(DB, S, pos, minEn) {
@@ -945,6 +981,7 @@ function stepMatch(DB, M) {
   let isContra = M.contra[t] && rnd() < (M.empty[t] ? 0.9 : cBase), emptyNet = isContra && M.empty[t], contragol = false;
   if (!isContra && M.conceded[t] && mA.contragol && rnd() < 0.3) { isContra = true; contragol = true; }
   M.contra[t] = false; M.empty[t] = false; M.conceded[t] = false;
+  if (!isContra) { phaseSwap(M, 1 - t, "def"); phaseSwap(M, t, "atk"); Object.assign(tvA, teamVals(DB, Atk)); Object.assign(tvD, teamVals(DB, Def)); }
   let finished = false;
   // pérdida
   let to = 0.165 + (tvD.def - tvA.pase) * 0.008;
@@ -1499,7 +1536,7 @@ function newGame(ci) {
   cupsInit();
   dayEvents();
   save();
-  UI.cs = null; UI.view = "coachsetup"; render();
+  UI.cs = null; UI.newFlow = true; UI.view = "coachsetup"; render();
 }
 // después de migrar, se completan los datos que falten (partidas que vienen de versiones viejas)
 function migrate(s) {
@@ -2502,6 +2539,7 @@ function vCoachSetup() {
   const P0 = UI.cs || (UI.cs = { name: "", nat: natOfClub(G.myClub), age: 35, path: "formativas", style: "equilibrado", spec: "tactico" });
   const ch = (key, map) => `<div class="cs-opts">${Object.entries(map).map(([k, v]) => `<button class="topt ${P0[key] === k ? "on" : ""}" data-cs="${key}" data-val="${k}"><b>${v[0]}</b>${typeof v[1] === "string" ? `<span class="muted sm">${v[1]}</span>` : ""}</button>`).join("")}</div>`;
   return `<div class="coach-setup">
+    ${G.coachP ? "" : `<div class="cs-top"><p>${!UI.newFlow ? "Esta versión del juego suma tu perfil de entrenador. Completalo y tocá el botón para guardarlo (podés seguir jugando y hacerlo después desde <b>Mi perfil</b>)." : "Antes de firmar, armá tu perfil de entrenador."}</p><button class="btn" data-act="cssave">${!UI.newFlow ? "Guardar perfil" : "Listo, a firmar el contrato"}</button></div>`}
     <section class="card"><span class="kicker">TU PERFIL DE ENTRENADOR</span><p class="muted">Así te van a conocer la prensa, los jugadores y los otros clubes. El nombre y la edad los podés cambiar cuando quieras; el estilo y la especialidad, entre temporadas.</p>
       <div class="cs-row"><label>Nombre y apellido<input id="cs-name" class="sel" maxlength="40" value="${esc(P0.name)}" placeholder="Por ejemplo: Emiliano Molaro"></label>
       <label>Nacionalidad<select id="cs-nat" class="sel">${COACH_NATS.map(([k, n]) => `<option value="${k}" ${P0.nat === k ? "selected" : ""}>${n}</option>`).join("")}</select></label>
@@ -2509,7 +2547,7 @@ function vCoachSetup() {
     <section class="card"><span class="kicker">DE DÓNDE VENÍS</span><p class="sm muted">Define con cuánta reputación arrancás.</p>${ch("path", Object.fromEntries(Object.entries(COACH_PATHS).map(([k, v]) => [k, [v[0], `Reputación inicial ${v[1]}`]])))}</section>
     <section class="card"><span class="kicker">ESTILO DE JUEGO</span><p class="sm muted">Si la táctica del partido va con tu estilo, el equipo rinde un poco más.</p>${ch("style", COACH_STYLES)}</section>
     <section class="card"><span class="kicker">ESPECIALIDAD</span>${ch("spec", COACH_SPECS)}</section>
-    <button class="btn big" data-act="cssave">${G.coachP ? "Guardar cambios" : "Listo, a firmar el contrato"}</button>
+    <button class="btn big" data-act="cssave">${G.coachP ? "Guardar cambios" : !UI.newFlow ? "Guardar perfil" : "Listo, a firmar el contrato"}</button>
   </div>`;
 }
 function readCoachForm() { const n = (document.getElementById("cs-name") || {}).value, a = +((document.getElementById("cs-age") || {}).value || 35), nat = (document.getElementById("cs-nat") || {}).value; if (n != null) UI.cs.name = n; UI.cs.age = clampN(a || 35, 25, 75); if (nat) UI.cs.nat = nat; }
@@ -2525,7 +2563,7 @@ function saveCoach() {
   G.conf = clampN(Math.round(50 + G.coachP.rep * 0.3), 40, 80);
   { const st = COACH_STYLES[c.style][2]; if (st.ritmo) G.tac.ritmo = st.ritmo; if (st.def) G.tac.def = st.def[0]; }
   UI.cs = null;
-  if (G.day === 0 && !G.history.length) { UI.press = { kind: "presentacion" }; UI.view = "press"; } else UI.view = "home";
+  if (UI.newFlow) { UI.newFlow = false; UI.press = { kind: "presentacion" }; UI.view = "press"; } else UI.view = "home";
   save(); render(); scrollTop();
 }
 function vCoach() {
@@ -2573,7 +2611,7 @@ function fixLineup() {
 function myCfg(riv) {
   const mark = riv != null && G.tac.mark != null && P(G.tac.mark)[1] === riv ? G.tac.mark : null;
   const md = gm(), plays = (G.activePlays || []).map(getPlay).filter(Boolean).map(p => ({ id: p.id, type: p.type, fin: p.fin }));
-  return { lineup: G.lineup, tac: { ...G.tac, dord: G.defOrder || {}, drol: G.defRole || {}, mark, bonus: matchBonus() + styleBonus() + (G.talk && G.talk.day === G.day ? G.talk.s * 0.012 : 0), tb: trainEffects(), model: md, plays, playFreq: FREQ[G.playFreq || "aveces"][1], req: null }, instr: G.instr, out: unavailable(), cond: G.cond, manual: G.rot === "manual", mor: G.staff ? myMor() : null, injMult: G.staff ? injMult() : 1 };
+  return { lineup: G.lineup, tac: { ...G.tac, dord: G.defOrder || {}, drol: G.defRole || {}, mark, bonus: matchBonus() + styleBonus() + (G.talk && G.talk.day === G.day ? G.talk.s * 0.012 : 0), tb: trainEffects(), model: md, plays, playFreq: FREQ[G.playFreq || "aveces"][1], req: null }, instr: G.instr, dsub: dsubValid(), out: unavailable(), cond: G.cond, manual: G.rot === "manual", mor: G.staff ? myMor() : null, injMult: G.staff ? injMult() : 1 };
 }
 const INJURIES = [["Esguince de tobillo", 7, 18], ["Contractura en el isquiotibial", 5, 12], ["Golpe en la rodilla", 3, 8], ["Rotura fibrilar en el gemelo", 18, 35], ["Lesión en el hombro", 14, 40], ["Esguince de dedo", 4, 10], ["Sobrecarga lumbar", 3, 9]];
 function kickOff() {
@@ -2774,6 +2812,7 @@ const VIEWS = {
 };
 function navBadge(k) {
   if (k === "inbox") { const n = unread(); return n ? `<span class="count">${n}</span>` : ""; }
+  if (k === "coach" && !G.coachP) return `<span class="count red">!</span>`;
   if (k === "news") { const n = (G.news || []).filter(x => x.id > (G.newsSeen || 0)).length; return n ? `<span class="count">${n > 99 ? "99+" : n}</span>` : ""; }
   if (k === "office") { return G.fired || (G.jobOffers || []).length ? `<span class="count${G.fired ? " red" : ""}">${G.fired ? "!" : G.jobOffers.length}</span>` : ""; }
   if (k === "train") { const n = Object.values(G.inj).filter(x => x.until > G.day).length; return n ? `<span class="count red">${n}</span>` : ""; }
@@ -2801,7 +2840,8 @@ function render() {
 }
 function renderInner() {
   if (!G) return renderStart();
-  if (!G.coachP && !G.pending && !["press", "live", "coachsetup"].includes(UI.view)) UI.view = "coachsetup";
+  if (!G.coachP && !UI.csShown && !G.pending && !["press", "live", "coachsetup"].includes(UI.view)) UI.view = "coachsetup";
+  if (UI.view === "coachsetup") UI.csShown = true;
   if (!VIEWS[UI.view]) UI.view = "home";
   if (UI.view !== "live") stopLive();
   const L = LEAGUES[myLg()], lg = G.S.leagues[myLg()], pos = myPos(), nm = nextMatch();
@@ -3548,16 +3588,36 @@ function tokenPos(pos) {
   if (pos === "AR") return [280, 34];
   return DEF[G.tac.def].slots[defOrder().indexOf(pos)];
 }
+// cambios ataque-defensa del equipo
+const dsubAuto = () => G.dsubMode !== "manual";
+function dsubValid() {
+  const un = new Set(unavailable()), lu = new Set(POS_ORDER.map(p => G.lineup[p])), out = {};
+  if (dsubAuto()) return aiDsub(DB, G.lineup, ROSTER[G.myClub].filter(pid => !un.has(pid)));
+  for (const pos in (G.dsub || {})) { const pid = G.dsub[pos]; if (pid != null && P(pid)[1] === G.myClub && !lu.has(pid) && !un.has(pid) && P(pid)[2] !== "AR" && G.lineup[pos] != null) out[pos] = pid; }
+  return out;
+}
+function defCourt() { const d = dsubValid(), c = { ...G.lineup }; for (const p in d) c[p] = d[p]; return c; }
+function defLevel(court) { const sys = G.tac.def, ord = defOrder(); return ord.reduce((a, p, k) => a + defFit(court[p], sys, k), 0) / 6; }
 function defPanel(pos) {
-  const sys = G.tac.def, ord = defOrder(), k = ord.indexOf(pos), pid = G.lineup[pos], role = defRole(sys, k);
   if (pos === "AR") return slotPanel(pos);
+  const sys = G.tac.def, ord = defOrder(), k = ord.indexOf(pos), dc = defCourt(), att = G.lineup[pos], cur = dc[pos], sw = cur !== att;
+  const lu = new Set(POS_ORDER.map(p => G.lineup[p])), un = new Set(unavailable()), used = new Set(Object.values(dsubValid()));
+  const cands = ROSTER[G.myClub].filter(pid => !lu.has(pid) && !un.has(pid) && P(pid)[2] !== "AR" && (!used.has(pid) || pid === cur)).sort((a, b) => defFit(b, sys, k) - defFit(a, sys, k)).slice(0, 6);
+  const weak = !sw && defFit(att, sys, k) < defLevel(G.lineup) - 2.5;
+  return defPanelBase(pos, cur) + `<div class="divider"></div><span class="h-sub">Cambio ataque-defensa</span>
+    <p class="sm">${sw ? `En ataque juega <b>${esc(P(att)[0])}</b>; cuando hay que defender entra <b>${esc(P(cur)[0])}</b>.` : `<b>${esc(P(att)[0])}</b> ataca y defiende.`}${weak ? ` <span class="bad">Defiende poco: en este puesto la defensa pierde nivel.</span>` : ""}</p>
+    ${dsubAuto() ? `<p class="sm muted">Ahora los cambios los decide el ayudante. <button class="link sm" data-act="dsubman">Elegirlos yo</button></p>` : `<div class="cands">${cands.map(pid => `<button class="cand ${pid === cur ? "on" : ""}" data-dsub="${pos}" data-pid="${pid}"><span class="num-c">${P(pid)[7] || ""}</span><span class="bn">${esc(P(pid)[0])} <span class="muted sm">${P(pid)[2]} · defensa ${P(pid)[8][6]}</span></span><span class="med">${defFit(pid, sys, k)}</span></button>`).join("")}${sw ? `<button class="cand" data-dsub="${pos}" data-pid=""><span class="bn">Sin cambio (defiende el titular)</span><span class="med">${defFit(att, sys, k)}</span></button>` : ""}</div>`}
+    <p class="muted sm">El cambio se hace en cada posesión, menos cuando el rival sale de contraataque: ahí no hay tiempo y defiende el que estaba.</p>`;
+}
+function defPanelBase(pos, pidD) {
+  const sys = G.tac.def, ord = defOrder(), k = ord.indexOf(pos), pid = pidD, role = defRole(sys, k);
   return `${playerHead(pid, `${DNAMES[sys][k]} · defensa ${sys.replace(/-/g, ":")}`, defFit(pid, sys, k))}
     <p class="sm muted">El número es cómo rinde defendiendo en este puesto: pesa la defensa y, según el lugar, ${DSLOT_ATTR[sys][k] === 7 ? "el físico (choque y bloqueo)" : "la velocidad (salir, cerrar y volver)"}.</p>
     <span class="h-sub">Rol en defensa</span>
     <div class="droles">${Object.entries(DROLE).map(([v, [l, d]]) => `<button class="drole ${role === v ? "on" : ""}" data-drole="${k}" data-val="${v}"><b>${l}</b><span class="sm muted">${d}</span></button>`).join("")}</div>
     <div class="divider"></div>
     <span class="h-sub">Cambiar de puesto con</span>
-    <div class="cands">${ord.map((q, j) => j === k ? "" : `<button class="cand" data-dswap="${q}" data-from="${pos}"><span class="num-c">${j + 1}</span><span class="bn">${esc(P(G.lineup[q])[0])} <span class="muted sm">${esc(DNAMES[sys][j])}</span></span><span class="med">${defFit(pid, sys, j)}</span></button>`).join("")}</div>
+    <div class="cands">${ord.map((q, j) => j === k ? "" : `<button class="cand" data-dswap="${q}" data-from="${pos}"><span class="num-c">${j + 1}</span><span class="bn">${esc(P(defCourt()[q])[0])} <span class="muted sm">${esc(DNAMES[sys][j])}</span></span><span class="med">${defFit(pid, sys, j)}</span></button>`).join("")}</div>
     <p class="muted sm">El número de la derecha es cómo rendiría ${esc(surname(P(pid)[0]))} en ese otro puesto. Para cambiar al jugador por un suplente, pasá a la vista de Ataque.</p>`;
 }
 function courtSVG() {
@@ -3576,10 +3636,11 @@ function vTactics() {
   const lu = G.lineup;
   if (!POS_ORDER.includes(UI.sel)) UI.sel = "CE";
   const tokens = POS_ORDER.map(pos => {
-    const pid = lu[pos], p = P(pid), [x, y] = tokenPos(pos), on = UI.sel === pos && UI.benchSel == null, out = p[2] !== pos;
-    return `<button class="tok ${on ? "on" : ""} ${pos === "AR" ? "gk" : ""}" style="left:${x / 5.6}%;top:${y / 5.6}%" data-tok="${pos}" aria-label="${POS_NAME[pos]}: ${esc(p[0])}">
+    const dc = UI.mode === "defensa" ? (UI._dc || (UI._dc = defCourt())) : null, pid = dc ? dc[pos] : lu[pos], p = P(pid), [x, y] = tokenPos(pos), on = UI.sel === pos && UI.benchSel == null, out = p[2] !== pos, swd = dc && pid !== lu[pos];
+    return `<button class="tok ${on ? "on" : ""} ${pos === "AR" ? "gk" : ""} ${swd ? "swd" : ""}" style="left:${x / 5.6}%;top:${y / 5.6}%" data-tok="${pos}" aria-label="${POS_NAME[pos]}: ${esc(p[0])}">
       <span class="tok-c">${p[7] || pos}</span><span class="tok-n">${esc(surname(p[0]))}${out && UI.mode === "ataque" ? ' <i class="warn-dot" title="fuera de puesto"></i>' : ""}</span>${UI.mode === "defensa" && pos !== "AR" ? (() => { const k = defOrder().indexOf(pos), r = defRole(G.tac.def, k); return `<span class="tok-r r-${r}">${r === "ant" ? "Anticipa" : r === "blo" ? "Bloquea" : defFit(pid, G.tac.def, k)}</span>`; })() : ""}${condOf(pid) < 100 ? `<span class="tok-e">${condBar(pid)}</span>` : ""}</button>`;
   }).join("");
+  UI._dc = null;
   const sysBtns = ["6-0", "5-1", "3-2-1"].map(s => `<button class="sys ${G.tac.def === s ? "on" : ""}" data-tac="def" data-val="${s}">${s.replace(/-/g, ":")}</button>`).join("");
   const ritBtns = [["lento", "Lento"], ["normal", "Normal"], ["rapido", "Rápido"]].map(([v, l]) => `<button class="chip ${G.tac.ritmo === v ? "on" : ""}" data-tac="ritmo" data-val="${v}">${l}</button>`).join("");
   const starters = new Set(POS_ORDER.map(p => lu[p]));
@@ -3595,7 +3656,7 @@ function vTactics() {
   return `<div class="tactics">
     <section class="t-main">
       <div class="t-head">
-        <p class="muted">${UI.benchSel != null ? `<b class="txt">${esc(P(UI.benchSel)[0])}</b> elegido: tocá en la cancha a quién reemplaza.` : UI.mode === "defensa" ? `Así se para el equipo en la ${G.tac.def.replace(/-/g, ":")}. Arrastrá una ficha sobre otra para cambiar puestos y tocá un jugador para darle un rol. <button class="link sm" data-act="defauto">Ordenar según aptitud</button>` : "Arrastrá una ficha sobre otra para cambiarlas de lugar, o un suplente del banco sobre un titular."}</p>
+        <p class="muted">${UI.benchSel != null ? `<b class="txt">${esc(P(UI.benchSel)[0])}</b> elegido: tocá en la cancha a quién reemplaza.` : UI.mode === "defensa" ? `Así se para el equipo en la ${G.tac.def.replace(/-/g, ":")}. Arrastrá una ficha sobre otra para cambiar puestos y tocá un jugador para darle un rol. <button class="link sm" data-act="defauto">Ordenar según aptitud</button><br>Nivel de la defensa: <b>${defLevel(defCourt()).toFixed(1)}</b>${Object.keys(dsubValid()).length ? ` (sin los cambios ataque-defensa sería ${defLevel(G.lineup).toFixed(1)})` : ""}. Cambios ataque-defensa: <span class="toggle sm-t"><button class="${dsubAuto() ? "on" : ""}" data-act="dsubauto">Los decide el ayudante</button><button class="${dsubAuto() ? "" : "on"}" data-act="dsubman">Los elijo yo</button></span>` : "Arrastrá una ficha sobre otra para cambiarlas de lugar, o un suplente del banco sobre un titular."}</p>
         <div class="toggle" role="group" aria-label="Fase"><button class="${UI.mode === "ataque" ? "on" : ""}" data-mode="ataque">Ataque</button><button class="${UI.mode === "defensa" ? "on" : ""}" data-mode="defensa">Defensa</button></div>
         ${UI.mode === "defensa" ? `<div class="toggle" role="group" aria-label="Sistema defensivo">${["6-0", "5-1", "3-2-1"].map(x => `<button class="${G.tac.def === x ? "on" : ""}" data-tac="def" data-val="${x}">${x.replace(/-/g, ":")}</button>`).join("")}</div>` : ""}
       </div>
@@ -4014,7 +4075,7 @@ document.addEventListener("pointercancel", () => { if (DRAG && DRAG.ghost) { DRA
 // ---------- eventos ----------
 document.addEventListener("click", e => {
   if (SUPPRESS_CLICK) { e.preventDefault(); return; }
-  const el = e.target.closest("[data-job],[data-sv],[data-cs],[data-newsf],[data-stab],[data-stfire],[data-sthire],[data-ptalk],[data-posttalk],[data-conf],[data-cupsel],[data-drole],[data-dswap],[data-cltab],[data-mksel],[data-mkpage],[data-mkloan],[data-feek],[data-ltab],[data-lmodel],[data-model],[data-pfreq],[data-pact],[data-pedit],[data-pdel],[data-pcopy],[data-edstep],[data-edfin],[data-edtype],[data-edtok],[data-lplay],[data-caltab],[data-calweek],[data-calmonth],[data-calday],[data-slot],[data-sess],[data-stylemenu],[data-wstyle],[data-ltac],[data-lsub],[data-lin],[data-mark],[data-rot],[data-instr],[data-intens],[data-train2],[data-go],[data-act],[data-pick],[data-club],[data-tac],[data-lg],[data-slg],[data-round],[data-pl],[data-tok],[data-bench],[data-swap],[data-mode],[data-filter],[data-msg],[data-train],[data-pressgo],[data-ans],[data-speed]");
+  const el = e.target.closest("[data-job],[data-sv],[data-cs],[data-newsf],[data-stab],[data-stfire],[data-sthire],[data-ptalk],[data-posttalk],[data-conf],[data-cupsel],[data-drole],[data-dswap],[data-dsub],[data-cltab],[data-mksel],[data-mkpage],[data-mkloan],[data-feek],[data-ltab],[data-lmodel],[data-model],[data-pfreq],[data-pact],[data-pedit],[data-pdel],[data-pcopy],[data-edstep],[data-edfin],[data-edtype],[data-edtok],[data-lplay],[data-caltab],[data-calweek],[data-calmonth],[data-calday],[data-slot],[data-sess],[data-stylemenu],[data-wstyle],[data-ltac],[data-lsub],[data-lin],[data-mark],[data-rot],[data-instr],[data-intens],[data-train2],[data-go],[data-act],[data-pick],[data-club],[data-tac],[data-lg],[data-slg],[data-round],[data-pl],[data-tok],[data-bench],[data-swap],[data-mode],[data-filter],[data-msg],[data-train],[data-pressgo],[data-ans],[data-speed]");
   if (!el) return;
   const d = el.dataset;
   if (d.cltab !== undefined) { UI.clTab = d.cltab; render(); return; }
@@ -4062,6 +4123,7 @@ document.addEventListener("click", e => {
   if (d.posttalk !== undefined) { const m = G.last, isH = m.h === G.myClub, gf = isH ? m.hg : m.ag, gc = isH ? m.ag : m.hg, riv = isH ? m.a : m.h, sc = talkScore(d.posttalk, { phase: "post", res: Math.sign(gf - gc), diff: strength(riv) - strength(G.myClub) }), up = talkReact(sc); G.ptalk = G.lastDay; G.ptalkTxt = `«${TALK_POST[d.posttalk]}». ${reactText(sc, up)}`; if (sc) G.moral = clampN(G.moral + sc * 3, 20, 95); save(); render(); return; }
   if (d.conf !== undefined) { const m = G.inbox.find(x => x.id === +d.mid); solveConflict(m, d.conf); save(); render(); return; }
   if (d.drole !== undefined) { const sys = G.tac.def; G.defRole = G.defRole || {}; const r = (G.defRole[sys] || Array(6).fill("eq")).slice(); r[+d.drole] = d.val; G.defRole[sys] = r; save(); render(); return; }
+  if (d.dsub !== undefined) { G.dsubMode = "manual"; G.dsub = G.dsub || {}; if (d.pid === "") delete G.dsub[d.dsub]; else { for (const p in G.dsub) if (G.dsub[p] === +d.pid) delete G.dsub[p]; G.dsub[d.dsub] = +d.pid; } save(); render(); return; }
   if (d.dswap !== undefined) { defSwap(d.from, d.dswap); return; }
   if (d.cupsel !== undefined) { UI.cupSel = d.cupsel; render(); return; }
   if (d.job !== undefined) { const ci = +d.job; UI.modal = { title: `Firmar con ${club(ci).n}`, text: G.fired ? `Te hacés cargo de ${club(ci).n}${G.ended ? " desde la temporada que viene" : " desde hoy"}.` : `Dejás ${club(G.myClub).n} para dirigir a ${club(ci).n}${G.ended ? " desde la temporada que viene" : ""}.`, ok: "Firmar", run: () => { takeJob(ci); UI.view = G.ended ? "end" : "home"; save(); render(); scrollTop(); } }; render(); return; }
@@ -4140,6 +4202,8 @@ document.addEventListener("click", e => {
     case "cssave": saveCoach(); break;
     case "csedit": { const c = G.coachP; UI.cs = { name: c.name, nat: c.nat, age: coachAge(), path: c.path, style: c.style, spec: c.spec }; UI.view = "coachsetup"; render(); scrollTop(); break; }
     case "defauto": defAuto(); render(); break;
+    case "dsubauto": G.dsubMode = "auto"; save(); render(); break;
+    case "dsubman": if (G.dsubMode !== "manual") { const a = dsubValid(); G.dsubMode = "manual"; G.dsub = { ...a }; } save(); render(); break;
     case "jobno": G.jobOffers = []; save(); render(); break;
     case "resume": G = migrate(load()); if (G.pending) resolvePending(); UI.view = G.ended ? "end" : "home"; save(); render(); break;
     case "more": UI.more = !UI.more; render(); break;
