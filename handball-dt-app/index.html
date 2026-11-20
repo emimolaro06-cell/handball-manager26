@@ -726,6 +726,18 @@ html,body{background:#0A1015}
 @media (max-width:700px){.news-r{grid-template-columns:auto 1fr}.news-c{display:none}.news-r .nowrap{grid-column:2}}
 .awards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin:14px 0;text-align:left}
 .aw{padding:10px 12px;border-radius:6px;background:rgba(255,255,255,.05);display:flex;flex-direction:column;gap:2px}.aw.mine{box-shadow:inset 0 0 0 1px var(--accent)}
+/* perfil del entrenador */
+.coach-setup{display:flex;flex-direction:column;gap:14px;max-width:980px}
+.cs-row{display:grid;grid-template-columns:2fr 1.4fr .7fr;gap:12px;margin-top:10px}.cs-row label{display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:var(--muted)}
+.cs-row .sel{width:100%;min-height:40px;font-size:14px;color:var(--text)}
+@media (max-width:700px){.cs-row{grid-template-columns:1fr}}
+.cs-opts{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px;margin-top:10px}
+.topt.on{box-shadow:inset 0 0 0 1px var(--accent);background:rgba(255,138,61,.1)}
+.coach-h{display:flex;align-items:center;gap:14px;margin-bottom:12px}
+.coach-av{width:64px;height:64px;border-radius:50%;display:grid;place-items:center;background:linear-gradient(135deg,var(--accent),#c9551a);color:#1A0E05;font:700 24px "Barlow Condensed",sans-serif;flex:none}
+.replog{margin-top:8px}
+.cs-row input{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:inherit}
+.cup-top select{width:auto}
 
 </style>
 </head>
@@ -1454,7 +1466,7 @@ function cyclePoints() {
 }
 function trainEffects() {
   const { pts } = cyclePoints(), cap = (v, k, m) => Math.min(m, v * k);
-  const k = 1 + 0.05 * (staffLvl("asistente") - 2), ak = staffLvl("arqueros"), fk = staffLvl("fisico");
+  const k = (1 + 0.05 * (staffLvl("asistente") - 2)) * (spec("tactico") ? 1.1 : 1), ak = staffLvl("arqueros"), fk = staffLvl("fisico");
   const fx = trainEffectsRaw(pts, cap); for (const x in fx) fx[x] *= k; fx.gk += 0.002 * ak; fx.prev = Math.min(0.7, fx.prev + 0.04 * fk); fx.rival += 0.001 * staffLvl("asistente"); return fx;
 }
 function trainEffectsRaw(pts, cap) {
@@ -1487,7 +1499,7 @@ function newGame(ci) {
   cupsInit();
   dayEvents();
   save();
-  UI.press = { kind: "presentacion" }; UI.view = "press"; render();
+  UI.cs = null; UI.view = "coachsetup"; render();
 }
 // después de migrar, se completan los datos que falten (partidas que vienen de versiones viejas)
 function migrate(s) {
@@ -1584,7 +1596,7 @@ function dayEvents() {
   if (dow === 1 && G.staff) lockerWeekly();
   if (G.conf != null) { if (dow === 1 && G.fin) aiTransfers(); if (dow === 1 && date.getDate() <= 7) coachFirings(); roundAwards(); }
   // recuperación física y altas médicas
-  const mdAll = matchDays(), prevLoad = mdAll[G.day - 1] ? 7 : dayLoad(G.day - 1, mdAll), rec = Math.round(10 - prevLoad + staffLvl("fisico") * 0.6 - ((G.streak || 0) <= -3 ? 1 : 0)), prevFx = trainEffects().prev;
+  const mdAll = matchDays(), prevLoad = mdAll[G.day - 1] ? 7 : dayLoad(G.day - 1, mdAll), rec = Math.round(10 - prevLoad + staffLvl("fisico") * 0.6 + (spec("fisico") ? 1 : 0) - ((G.streak || 0) <= -3 ? 1 : 0)), prevFx = trainEffects().prev;
   for (const pid of ROSTER[G.myClub]) {
     if (G.inj[pid]) { if (G.inj[pid].until <= G.day) { addMsg("Cuerpo médico", `Alta médica para ${P(pid)[0]}`, `<p>${esc(P(pid)[0])} ya está recuperado y vuelve a estar disponible.</p>`); delete G.inj[pid]; G.cond[pid] = 75; } continue; }
     const c0 = condOf(pid);
@@ -1678,7 +1690,7 @@ function evolvePlayers() {
       const lg = G.S.leagues[G.clubLeague[p[1]]], n = lg ? lg.fixture.length : 26, pj = (G.S.stats[pid] || {}).pj || 0;
       d += pj >= n * 0.6 ? 0.4 : pj < n * 0.2 ? -0.3 : 0.1;
     }
-    if (p[1] === G.myClub) d += a <= 26 ? intens : -Math.abs(intens) * 0.5;
+    if (p[1] === G.myClub) d += (a <= 26 ? intens : -Math.abs(intens) * 0.5) + (a <= 21 && spec("formador") ? 0.3 : 0);
     let di = sround(d);
     if (di > 0) di = Math.min(di, Math.max(0, Math.ceil(pot) - p[3]));
     di = clampN(p[3] + di, 4, 20) - p[3];
@@ -1712,7 +1724,7 @@ function youthIntake() {
   const POSS = ["AR", "EI", "LI", "CE", "LD", "ED", "PI"], n = 2 + (v >= 4 ? 1 : 0) + (r() < 0.4 ? 1 : 0);
   for (let k = 0; k < n; k++) {
     const pos = POSS[Math.floor(r() * POSS.length)], media = clampN(Math.round(st - 4 - r() * 3), 5, 15), pid = genPlayer(G.myClub, pos, media, 17 + Math.floor(r() * 2), (Date.now() + k * 977) % 1e6);
-    G.world.pot[pid] = Math.min(19.5, Math.round((media + 2.5 + r() * 6 + v * 0.3) * 10) / 10);
+    G.world.pot[pid] = Math.min(19.5, Math.round((media + 2.5 + r() * 6 + v * 0.3 + (spec("formador") ? 1 : 0)) * 10) / 10);
     G.contract[pid] = G.season + 2; G.wage[pid] = Math.round(baseWage(pid) * 0.6 / 100) * 100; mine.push(pid);
   }
   for (const ci in ROSTER) {
@@ -1851,8 +1863,8 @@ function resolveOffers() {
     // el jugador
     const myS = strength(G.myClub), myCountry = (G.clubLeague[G.myClub] || "").slice(0, 3), hisCountry = ci >= 0 ? (G.clubLeague[ci] || "").slice(0, 3) : myCountry;
     if (myCountry === "arg" && hisCountry !== "arg" && p[5] !== "ARG") { addMsg("Mercado", `${name} no quiere venir`, `<p>No tiene interés en jugar en Argentina.</p>`); continue; }
-    if (p[3] > myS + 5) { addMsg("Mercado", `${name} no quiere venir`, `<p>Apunta a un club más grande. Hoy no ve a ${esc(club(G.myClub).n)} como un paso adelante.</p>`); continue; }
-    const demand = Math.round(wageOf(o.pid) * (p[3] > myS + 2 ? 1.5 : 1.1) * (0.95 + o.seed * 0.15) / 100) * 100;
+    if (p[3] > myS + 5 + (G.coachP ? (G.coachP.rep - 40) / 20 : 0)) { addMsg("Mercado", `${name} no quiere venir`, `<p>Apunta a un club más grande. Hoy no ve a ${esc(club(G.myClub).n)} como un paso adelante.</p>`); continue; }
+    const demand = Math.round(wageOf(o.pid) * (p[3] > myS + 2 ? 1.5 : 1.1) * (0.95 + o.seed * 0.15) * (G.coachP ? 1.04 - G.coachP.rep / 800 : 1) / 100) * 100;
     if (o.wage < demand) {
       if (o.wage >= demand * 0.8 && !o.wcounter) addMsg("Mercado", `${name} pide más sueldo`, `<p>Le interesa venir, pero pide <b>${fmtM(demand)} por año</b> (ofreciste ${fmtM(o.wage)}).</p>`, { act: "counter", offer: { ...o, wage: demand, wcounter: true } });
       else addMsg("Mercado", `${name} rechazó el contrato`, `<p>El sueldo ofrecido (${fmtM(o.wage)}) está muy lejos de lo que pretende.</p>`);
@@ -2254,7 +2266,7 @@ const temple = pid => seedRnd(pid * 13 + 7)();
 const pmLabel = v => v >= 80 ? "Muy contento" : v >= 62 ? "Contento" : v >= 45 ? "Normal" : v >= 30 ? "Molesto" : "Muy molesto";
 const pmClass = v => v >= 62 ? "ok" : v < 45 ? "bad" : "";
 function myMor() { const o = {}; for (const pid of ROSTER[G.myClub]) o[pid] = pmFactor(pid); return o; }
-const injMult = () => clampN((1 - 0.05 * staffLvl("fisico")) * (G.streak <= -3 ? 1 + 0.12 * Math.min(4, -G.streak - 2) : 1), 0.6, 1.6);
+const injMult = () => clampN((1 - 0.05 * staffLvl("fisico")) * (spec("fisico") ? 0.9 : 1) * (G.streak <= -3 ? 1 + 0.12 * Math.min(4, -G.streak - 2) : 1), 0.6, 1.6);
 // después de cada partido: ánimo según el resultado y los minutos
 function lockerAfter(mine) {
   const isH = mine.h === G.myClub, gf = isH ? mine.hg : mine.ag, gc = isH ? mine.ag : mine.hg, res = gf > gc ? 1 : gf < gc ? -1 : 0;
@@ -2272,7 +2284,7 @@ function lockerAfter(mine) {
 // promesas de minutos que se vencen, conflictos, recuperación del ánimo
 function lockerWeekly() {
   if (!G.pm) G.pm = {};
-  for (const pid of ROSTER[G.myClub]) G.pm[pid] = Math.round(pmOf(pid) + (60 - pmOf(pid)) * 0.08);
+  for (const pid of ROSTER[G.myClub]) G.pm[pid] = Math.round(pmOf(pid) + (60 - pmOf(pid)) * (spec("motivador") ? 0.14 : 0.08));
   for (const k in (G.promise || {})) { const pr = G.promise[k], pid = +k; if (G.day < pr.until) continue;
     if (P(pid)[1] === G.myClub && pr.got < pr.need) { pmAdd(pid, -25); G.moral = clampN(G.moral - 4, 20, 95); addMsg("Plantel", `${P(pid)[0]} está enojado`, `<p>Le prometiste minutos a ${esc(P(pid)[0])} y no jugó lo que esperaba (${pr.got} de ${pr.need} partidos). Se siente engañado y en el vestuario lo comentan.</p>`); }
     else if (P(pid)[1] === G.myClub) pmAdd(pid, 6);
@@ -2295,7 +2307,7 @@ const TALK_HT = { felicitar: "Felicitar", pedir: "Pedir más", calmar: "Calmar",
 const TALK_POST = { felicitar: "Felicitar", mas: "Pueden dar más", criticar: "Críticas duras" };
 function talkScore(kind, ctx) {
   // ctx: diff = fuerza rival − nuestra (positivo: somos inferiores), streak, score (en el entretiempo, nuestra ventaja)
-  const r = Math.random() - 0.5;
+  const r = Math.random() - 0.5 + (spec("motivador") ? 0.3 : 0);
   if (ctx.phase === "pre") {
     const under = ctx.diff > 0.6, fav = ctx.diff < -0.6, bad = (G.streak || 0) <= -2;
     const base = { motivar: under ? 1 : fav ? 0 : 0.5, calma: bad ? 1 : under ? 0.3 : 0, exigir: fav ? 0.8 : bad ? -0.8 : under ? -0.5 : 0.2, disfrutar: under ? 0.6 : fav ? -0.8 : 0 }[kind];
@@ -2373,7 +2385,7 @@ function coachFirings() {
       const pos = t.indexOf(ci), e = exp.indexOf(ci);
       if (pos - e < 5 || Math.random() > 0.22) continue;
       G.coaches = G.coaches || {}; const old = G.coaches[ci] || club(ci).e || "", nw = genName(natOfClub(ci), seedRnd(ci * 31 + G.day + G.season));
-      G.coaches[ci] = nw; fired++;
+      G.coaches[ci] = nw; fired++; { const rr = seedRnd(ci * 7 + G.day)(), st = Object.keys(COACH_STYLES), sp = Object.keys(COACH_SPECS), prev = coachOf(ci); setCoach(ci, { name: nw, age: 34 + Math.floor(rr * 24), style: st[Math.floor(rr * 97) % st.length], spec: sp[Math.floor(rr * 89) % sp.length], rep: clampN(prev.rep - 6 + Math.round(rr * 8), 5, 95) }); }
       news("dt", `${club(ci).n} despidió ${old ? `a ${old}` : "a su entrenador"} tras quedar ${pos + 1}.º. Asume ${nw}.`, [ci], id);
     }
   }
@@ -2427,6 +2439,116 @@ function vNews() {
   return `<div class="cup-top"><div class="filters">${[["todas", "Todas"], ...Object.entries(NEWS_KIND).map(([k, v]) => [k, v[1]])].map(([k, l]) => `<button class="chip ${f === k ? "on" : ""}" data-newsf="${k}">${l}</button>`).join("")}</div><label class="chk sm"><input type="checkbox" id="news-mine" ${mineOnly ? "checked" : ""}> Solo mi liga y mi club</label></div>
   <section class="card flush">${list.length ? list.slice(0, 80).map(x => `<div class="news-r"><span class="news-k k-${x.kind}">${NEWS_KIND[x.kind][0]}</span><span class="news-c">${x.c.slice(0, 2).map(c => badge(c, 22)).join("")}</span><span class="news-t">${esc(x.txt)}</span><span class="muted sm nowrap">${x.season === G.season ? fDateShort(dayDate(x.day)) : seasonLabel(x.season)}</span></div>`).join("") : '<p class="muted pad">Todavía no hay noticias. Van apareciendo a medida que avanza la temporada.</p>'}</section>`;
 }
+// ---------- PERFIL DEL ENTRENADOR Y REPUTACIÓN ----------
+const COACH_STYLES = {
+  vertical: ["Rápido y vertical", "Contraataque, primera y segunda oleada, ataques cortos.", { ritmo: "rapido" }],
+  control: ["Control y paciencia", "Ataque posicional largo, pocas pérdidas, se elige bien el tiro.", { ritmo: "lento" }],
+  defensa: ["Defensa primero", "Todo arranca en una defensa sólida y agresiva; se ataca después.", { def: ["5-1", "3-2-1"] }],
+  equilibrado: ["Equilibrado", "Se adapta a cada rival sin una idea fija.", {}],
+};
+const COACH_SPECS = {
+  formador: ["Formador de juveniles", "Los chicos de 21 o menos crecen más y las inferiores suben mejores jugadores."],
+  tactico: ["Táctico", "El entrenamiento de ataque y defensa rinde más y las jugadas preparadas salen mejor."],
+  motivador: ["Motivador", "Las charlas pegan mejor y el vestuario se recupera más rápido de los golpes."],
+  fisico: ["Preparación física", "El equipo se recupera más rápido y se lesiona menos."],
+};
+const COACH_PATHS = { debut: ["Primer trabajo", 12], formativas: ["Viene de formativas", 22], ascenso: ["Dirigió en el ascenso", 34], primera: ["Dirigió en primera", 48] };
+const COACH_NATS = [["ARG", "Argentina"], ["ESP", "España"], ["GER", "Alemania"], ["FRA", "Francia"], ["DEN", "Dinamarca"], ["NOR", "Noruega"], ["SWE", "Suecia"], ["CRO", "Croacia"], ["SLO", "Eslovenia"], ["SRB", "Serbia"], ["HUN", "Hungría"], ["POL", "Polonia"], ["POR", "Portugal"], ["ITA", "Italia"], ["BRA", "Brasil"], ["CHI", "Chile"], ["URU", "Uruguay"], ["MKD", "Macedonia del Norte"], ["ROU", "Rumania"], ["SUI", "Suiza"]];
+const repLevel = r => r >= 80 ? "Mundial" : r >= 60 ? "Continental" : r >= 40 ? "Nacional" : r >= 20 ? "Local" : "Desconocido";
+const spec = k => G.coachP && G.coachP.spec === k;
+const coachAge = () => G.coachP ? G.coachP.age + (G.season - G.coachP.since) : 40;
+function repAdd(v, why) {
+  if (!G.coachP) return; const b = G.coachP.rep; G.coachP.rep = clampN(Math.round((b + v) * 10) / 10, 0, 100);
+  if (why) (G.coachP.repLog = G.coachP.repLog || []).unshift({ season: G.season, v: Math.round(v * 10) / 10, why }); if (G.coachP.repLog && G.coachP.repLog.length > 30) G.coachP.repLog.length = 30;
+  if (repLevel(b) !== repLevel(G.coachP.rep)) addMsg("Prensa", `Tu nombre ya es ${repLevel(G.coachP.rep).toLowerCase() === "mundial" ? "conocido en todo el mundo" : `de nivel ${repLevel(G.coachP.rep).toLowerCase()}`}`, `<p>Tu reputación como entrenador ${G.coachP.rep > b ? "subió" : "bajó"} a <b>${repLevel(G.coachP.rep)}</b> (${Math.round(G.coachP.rep)}/100).</p><p>${G.coachP.rep > b ? "Más clubes grandes se van a fijar en vos y a los jugadores les va a costar menos venir." : "Los clubes grandes van a mirar a otro lado por un tiempo."}</p>`);
+}
+// el estilo del DT encaja con la táctica que eligió: un pequeño plus
+function styleBonus() {
+  if (!G.coachP) return 0; const st = COACH_STYLES[G.coachP.style][2];
+  if (st.ritmo && G.tac.ritmo === st.ritmo) return 0.006;
+  if (st.def && st.def.includes(G.tac.def)) return 0.006;
+  return 0;
+}
+// fin de temporada: la reputación se mueve según lo que lograste
+function seasonRep(h) {
+  if (!G.coachP) return;
+  const L = LEAGUES[h.lg] || {}, lf = Math.min(1.5, LEAGUE_F[h.lg] || 0.5), big = 0.5 + lf * 0.5;
+  if (h.pos === 1 && !h.fired) repAdd(14 * big, `Campeón de ${L.name}`);
+  else if (h.ok) repAdd(5 * big, "Objetivo cumplido");
+  else repAdd(-5, "Objetivo no cumplido");
+  for (const [n, r] of (h.cups || [])) { if (r === "Campeón") repAdd(n === "EHF European League" ? 10 : /Super/i.test(n) ? 2 : 5 * big, `Ganó ${n}`); else if (r === "Finalista" && n === "EHF European League") repAdd(4, `Finalista de ${n}`); }
+  if (h.cl === "Campeón") repAdd(20, "Campeón de la Champions League"); else if (h.cl === "Finalista") repAdd(9, "Finalista de la Champions"); else if (h.cl === "Semifinal") repAdd(5, "Final4 de la Champions");
+  for (const id in G.moves || {}) if (G.moves[id].up.includes(G.myClub)) repAdd(8, "Ascenso");
+}
+// entrenadores de los demás clubes: perfil fijo por club (cambia si lo echan)
+function coachOf(ci) {
+  G.coachDB = G.coachDB || {};
+  if (G.coachDB[ci]) return G.coachDB[ci];
+  const r = seedRnd(ci * 101 + 17), c = club(ci), nat = natOfClub(ci), lf = Math.min(2.5, LEAGUE_F[G.clubLeague[ci]] || 0.5);
+  const name = (G.coaches && G.coaches[ci]) || c.e || genName(nat, r);
+  const styles = Object.keys(COACH_STYLES), specs = Object.keys(COACH_SPECS);
+  return { name, nat, age: 36 + Math.floor(r() * 26), style: styles[Math.floor(r() * styles.length)], spec: specs[Math.floor(r() * specs.length)], rep: clampN(Math.round(10 + (c.v || 2) * 9 + lf * 10 + r() * 12), 5, 95) };
+}
+function setCoach(ci, o) { G.coachDB = G.coachDB || {}; G.coachDB[ci] = { ...coachOf(ci), ...o }; }
+// la táctica de cada club la decide el estilo de su entrenador
+const _aiTacticBase = aiTactic;
+aiTactic = function (ci) {
+  const t = _aiTacticBase(ci); if (!G || ci == null || !DB.clubs[ci]) return t;
+  const c = coachOf(ci);
+  if (c.style === "vertical") t.ritmo = "rapido"; else if (c.style === "control") t.ritmo = "lento"; else if (c.style === "defensa") t.def = ci % 2 ? "5-1" : "3-2-1";
+  return t;
+};
+function vCoachSetup() {
+  const P0 = UI.cs || (UI.cs = { name: "", nat: natOfClub(G.myClub), age: 35, path: "formativas", style: "equilibrado", spec: "tactico" });
+  const ch = (key, map) => `<div class="cs-opts">${Object.entries(map).map(([k, v]) => `<button class="topt ${P0[key] === k ? "on" : ""}" data-cs="${key}" data-val="${k}"><b>${v[0]}</b>${typeof v[1] === "string" ? `<span class="muted sm">${v[1]}</span>` : ""}</button>`).join("")}</div>`;
+  return `<div class="coach-setup">
+    <section class="card"><span class="kicker">TU PERFIL DE ENTRENADOR</span><p class="muted">Así te van a conocer la prensa, los jugadores y los otros clubes. El nombre y la edad los podés cambiar cuando quieras; el estilo y la especialidad, entre temporadas.</p>
+      <div class="cs-row"><label>Nombre y apellido<input id="cs-name" class="sel" maxlength="40" value="${esc(P0.name)}" placeholder="Por ejemplo: Emiliano Molaro"></label>
+      <label>Nacionalidad<select id="cs-nat" class="sel">${COACH_NATS.map(([k, n]) => `<option value="${k}" ${P0.nat === k ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+      <label>Edad<input id="cs-age" class="sel" type="number" min="25" max="75" value="${P0.age}"></label></div></section>
+    <section class="card"><span class="kicker">DE DÓNDE VENÍS</span><p class="sm muted">Define con cuánta reputación arrancás.</p>${ch("path", Object.fromEntries(Object.entries(COACH_PATHS).map(([k, v]) => [k, [v[0], `Reputación inicial ${v[1]}`]])))}</section>
+    <section class="card"><span class="kicker">ESTILO DE JUEGO</span><p class="sm muted">Si la táctica del partido va con tu estilo, el equipo rinde un poco más.</p>${ch("style", COACH_STYLES)}</section>
+    <section class="card"><span class="kicker">ESPECIALIDAD</span>${ch("spec", COACH_SPECS)}</section>
+    <button class="btn big" data-act="cssave">${G.coachP ? "Guardar cambios" : "Listo, a firmar el contrato"}</button>
+  </div>`;
+}
+function readCoachForm() { const n = (document.getElementById("cs-name") || {}).value, a = +((document.getElementById("cs-age") || {}).value || 35), nat = (document.getElementById("cs-nat") || {}).value; if (n != null) UI.cs.name = n; UI.cs.age = clampN(a || 35, 25, 75); if (nat) UI.cs.nat = nat; }
+function saveCoach() {
+  readCoachForm(); const c = UI.cs, name = (c.name || "").trim() || "Entrenador sin nombre";
+  if (G.coachP) {
+    const canBig = G.ended || G.day <= 7;
+    Object.assign(G.coachP, { name, nat: c.nat, age: c.age - (G.season - G.coachP.since) });
+    if (canBig) Object.assign(G.coachP, { style: c.style, spec: c.spec });
+    UI.cs = null; UI.view = "coach"; save(); render(); return;
+  }
+  G.coachP = { name, nat: c.nat, age: c.age, since: G.season, style: c.style, spec: c.spec, path: c.path, rep: COACH_PATHS[c.path][1], repLog: [] };
+  G.conf = clampN(Math.round(50 + G.coachP.rep * 0.3), 40, 80);
+  { const st = COACH_STYLES[c.style][2]; if (st.ritmo) G.tac.ritmo = st.ritmo; if (st.def) G.tac.def = st.def[0]; }
+  UI.cs = null;
+  if (G.day === 0 && !G.history.length) { UI.press = { kind: "presentacion" }; UI.view = "press"; } else UI.view = "home";
+  save(); render(); scrollTop();
+}
+function vCoach() {
+  const c = G.coachP; if (!c) return vCoachSetup();
+  const cs = G.cstats || { pj: 0, g: 0, e: 0, p: 0 }, titles = [];
+  G.history.forEach(h => { if (h.pos === 1 && !h.fired) titles.push([h.season, LEAGUES[h.lg] ? LEAGUES[h.lg].name : "Liga", h.club]); (h.cups || []).forEach(([n, r]) => { if (r === "Campeón") titles.push([h.season, n, h.club]); }); if (h.cl === "Campeón") titles.push([h.season, "Champions League", h.club]); });
+  const clubsT = [...new Set(G.history.map(h => h.club).concat([G.myClub]))];
+  const lgClubs = G.S.leagues[myLg()].clubs.filter(ci => ci !== G.myClub);
+  const others = [...lgClubs.map(ci => ({ ci, ...coachOf(ci) })), { ci: G.myClub, ...c, me: true }].sort((a, b) => b.rep - a.rep);
+  const canBig = G.ended || G.day <= 7;
+  return `<div class="office">
+    <section class="card coach-card"><div class="coach-h"><span class="coach-av">${esc(c.name.split(" ").map(w => w[0]).slice(0, 2).join(""))}</span><div><span class="kicker">ENTRENADOR</span><h2 style="margin:2px 0">${esc(c.name)}</h2><span class="muted">${esc((COACH_NATS.find(x => x[0] === c.nat) || [0, c.nat])[1])} · ${coachAge()} años · ${esc(COACH_PATHS[c.path] ? COACH_PATHS[c.path][0] : "")}</span></div></div>
+      <div class="kv"><span>Estilo de juego</span><b>${COACH_STYLES[c.style][0]}</b></div><div class="kv"><span>Especialidad</span><b>${COACH_SPECS[c.spec][0]}</b></div>
+      <p class="sm muted">${COACH_STYLES[c.style][1]} ${COACH_SPECS[c.spec][1]}</p>
+      <p class="sm ${styleBonus() ? "ok" : "muted"}">${styleBonus() ? "La táctica actual va con tu estilo: el equipo rinde un poco más." : "La táctica actual no va con tu estilo. Cambiala en Modelo de juego si querés aprovecharlo."}</p>
+      <button class="btn ghost" data-act="csedit">Editar perfil</button>${canBig ? "" : `<span class="sm muted" style="margin-left:10px">Estilo y especialidad se cambian entre temporadas.</span>`}</section>
+    <section class="card"><span class="kicker">REPUTACIÓN</span><div class="conf"><div class="conf-n" style="color:var(--gold)">${Math.round(c.rep)}<small>/100</small></div><div class="conf-r"><b>${repLevel(c.rep)}</b><div class="conf-bar"><i style="width:${c.rep}%;background:var(--gold)"></i></div><p class="sm muted">Decide qué clubes te llaman y qué jugadores aceptan venir. Sube con títulos y objetivos cumplidos; baja con despidos y temporadas malas.</p></div></div>
+      ${(c.repLog || []).length ? `<div class="replog">${c.repLog.slice(0, 8).map(x => `<div class="kv sm"><span>${seasonLabel(x.season)} · ${esc(x.why)}</span><b class="${x.v > 0 ? "ok" : "bad"}">${x.v > 0 ? "+" : ""}${x.v}</b></div>`).join("")}</div>` : ""}</section>
+    <section class="card"><span class="kicker">NÚMEROS DE TU CARRERA</span><div class="facts"><div><span class="kicker">PARTIDOS</span><b>${cs.pj}</b></div><div><span class="kicker">GANADOS</span><b class="ok">${cs.g}</b></div><div><span class="kicker">EMPATADOS</span><b>${cs.e}</b></div><div><span class="kicker">PERDIDOS</span><b class="bad">${cs.p}</b></div><div><span class="kicker">EFECTIVIDAD</span><b>${cs.pj ? Math.round(100 * (cs.g + cs.e / 2) / cs.pj) : 0}%</b></div><div><span class="kicker">CLUBES</span><b>${clubsT.length}</b></div></div></section>
+    <section class="card"><span class="kicker">TÍTULOS</span>${titles.length ? titles.map(([s, n, ci]) => `<div class="kv"><span>🏆 ${esc(n)}</span><b>${badge(ci, 16)} ${seasonLabel(s)}</b></div>`).join("") : `<p class="muted">Todavía ninguno. Ya va a llegar.</p>`}</section>
+    <section class="card flush span2"><div class="card-h"><span class="kicker">ENTRENADORES DE ${esc(LEAGUES[myLg()].name.toUpperCase())}</span></div><table class="tbl"><thead><tr><th>#</th><th class="tl">ENTRENADOR</th><th class="tl">CLUB</th><th class="tl">ESTILO</th><th class="tl">ESPECIALIDAD</th><th>EDAD</th><th>REP.</th></tr></thead><tbody>${others.map((o, i) => `<tr class="${o.me ? "mine" : ""}"><td>${i + 1}</td><td class="tl"><b>${esc(o.name)}</b> <span class="muted sm">${o.nat}</span></td><td class="tl">${badge(o.ci, 16)} ${esc(club(o.ci).n)}</td><td class="tl sm">${COACH_STYLES[o.style][0]}</td><td class="tl sm muted">${COACH_SPECS[o.spec][0]}</td><td>${o.me ? coachAge() : o.age}</td><td><b>${Math.round(o.rep)}</b></td></tr>`).join("")}</tbody></table></section>
+  </div>`;
+}
 // ---------- disponibilidad y físico ----------
 const isInj = pid => !!(G.inj[pid] && G.inj[pid].until > G.day);
 const isSusp = pid => (G.susp[pid] || 0) > 0;
@@ -2451,7 +2573,7 @@ function fixLineup() {
 function myCfg(riv) {
   const mark = riv != null && G.tac.mark != null && P(G.tac.mark)[1] === riv ? G.tac.mark : null;
   const md = gm(), plays = (G.activePlays || []).map(getPlay).filter(Boolean).map(p => ({ id: p.id, type: p.type, fin: p.fin }));
-  return { lineup: G.lineup, tac: { ...G.tac, dord: G.defOrder || {}, drol: G.defRole || {}, mark, bonus: matchBonus() + (G.talk && G.talk.day === G.day ? G.talk.s * 0.012 : 0), tb: trainEffects(), model: md, plays, playFreq: FREQ[G.playFreq || "aveces"][1], req: null }, instr: G.instr, out: unavailable(), cond: G.cond, manual: G.rot === "manual", mor: G.staff ? myMor() : null, injMult: G.staff ? injMult() : 1 };
+  return { lineup: G.lineup, tac: { ...G.tac, dord: G.defOrder || {}, drol: G.defRole || {}, mark, bonus: matchBonus() + styleBonus() + (G.talk && G.talk.day === G.day ? G.talk.s * 0.012 : 0), tb: trainEffects(), model: md, plays, playFreq: FREQ[G.playFreq || "aveces"][1], req: null }, instr: G.instr, out: unavailable(), cond: G.cond, manual: G.rot === "manual", mor: G.staff ? myMor() : null, injMult: G.staff ? injMult() : 1 };
 }
 const INJURIES = [["Esguince de tobillo", 7, 18], ["Contractura en el isquiotibial", 5, 12], ["Golpe en la rodilla", 3, 8], ["Rotura fibrilar en el gemelo", 18, 35], ["Lesión en el hombro", 14, 40], ["Esguince de dedo", 4, 10], ["Sobrecarga lumbar", 3, 9]];
 function kickOff() {
@@ -2504,14 +2626,17 @@ function jobCandidates(kind) {
   const st = strength(G.myClub), curR = G.S.leagues[myLg()].round;
   let c = DB.clubs.map((x, i) => i).filter(i => i !== G.myClub && LEAGUES[G.clubLeague[i]] && G.clubLeague[i] !== "intl" && ROSTER[i].length >= 10);
   if (kind === "mid") c = c.filter(i => { const lg = G.S.leagues[G.clubLeague[i]]; return lg && lg.round === curR && lg.round < lg.fixture.length; });
-  const lo = kind === "up" ? st + 0.3 : st - 3.5, hi = kind === "up" ? st + 2.8 : st - 0.3;
+  const cap = G.coachP ? 9 + G.coachP.rep * 0.085 : 99;
+  if (kind === "up" && cap < st + 0.6) return [];
+  let lo = kind === "up" ? st + 0.3 : st - 3.5, hi = kind === "up" ? Math.min(st + 2.8, cap) : Math.min(st - 0.3, cap);
+  if (hi < lo + 0.4) { lo = Math.min(lo, hi - 0.8); }
   let pool = c.filter(i => strength(i) >= lo && strength(i) <= hi);
   if (pool.length < 3) pool = c.slice().sort((a, b) => Math.abs(strength(a) - (lo + hi) / 2) - Math.abs(strength(b) - (lo + hi) / 2)).slice(0, 8);
   const out = []; while (pool.length && out.length < 3) out.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
   return out;
 }
 function fireCoach(atEnd) {
-  G.fired = true; const old = G.myClub;
+  G.fired = true; const old = G.myClub; repAdd(-10, `Despedido de ${club(old).n}`);
   if (!atEnd) G.history.push({ season: G.season, lg: myLg(), pos: myPos(), champ: null, club: old, obj: G.obj.text, ok: false, cl: null, fired: G.S.leagues[myLg()].round });
   G.jobOffers = jobCandidates(atEnd ? "down" : "mid").map(ci => ({ ci, kind: "down" }));
   addMsg("Directiva", "Fin de tu ciclo en " + club(old).n, `<p>Lamentamos comunicarte que la directiva decidió prescindir de tus servicios. ${atEnd ? "La temporada no salió como esperábamos." : "Los resultados no llegaron y creemos que hace falta un cambio."}</p><p>Te agradecemos el trabajo. En el despacho tenés las propuestas que llegaron de otros clubes.</p>`);
@@ -2553,6 +2678,7 @@ function afterMatch(mine) {
   G.moral = clampN(G.moral + dm, 20, 95); G.pressTone = null;
   G.moral = clampN(G.moral + STYLES[weekStyle(G.day)].moral, 20, 95);
   if (G.staff) lockerAfter(mine);
+  { const c = G.cstats = G.cstats || { pj: 0, g: 0, e: 0, p: 0 }; c.pj++; if (gf > gc) c.g++; else if (gf < gc) c.p++; else c.e++; }
   const info = mine.sides && mine.sides[isH ? 0 : 1];
   for (const pid of ROSTER[G.myClub]) if (G.susp[pid]) { G.susp[pid]--; if (!G.susp[pid]) delete G.susp[pid]; }
   if (!info) return;
@@ -2575,7 +2701,7 @@ function endSeason() {
   let clRes = null; if (G.cl && G.cl.groups.flat().includes(G.myClub)) { const C = G.cl; clRes = C.champ === G.myClub ? "Campeón" : C.ties.F && C.ties.F[0] && [C.ties.F[0].a, C.ties.F[0].b].includes(G.myClub) ? "Finalista" : C.ties.SF && C.ties.SF.some(x => [x.a, x.b].includes(G.myClub)) ? "Semifinal" : C.ties.QF && C.ties.QF.some(x => [x.a, x.b].includes(G.myClub)) ? "Cuartos" : C.ties.R16 && C.ties.R16.some(x => [x.a, x.b].includes(G.myClub)) ? "Octavos" : "Fase de grupos"; }
   G.history.push({ season: G.season, lg: myLg(), pos, champ: t[0].c, club: G.myClub, obj: G.obj.text, ok: pos <= G.obj.target, cl: clRes, cups: G.cups ? Object.values(G.cups).filter(cupIn).map(C => [C.name, cupResult(C)]) : [] });
   G.moves = moves; G.ended = true; UI.view = "end";
-  if (G.conf != null) { const h = G.history[G.history.length - 1]; h.awards = seasonAwards(); seasonBoard(h); }
+  if (G.conf != null) { const h = G.history[G.history.length - 1]; h.awards = seasonAwards(); seasonRep(h); seasonBoard(h); }
 }
 function simToEnd() {
   let guard = 0;
@@ -2625,12 +2751,12 @@ function nextMatch() {
 const ICON = {
   home: "M3 10.5 12 3l9 7.5V21h-6v-6H9v6H3z", inbox: "M3 13h5l2 3h4l2-3h5M5 5h14l2 8v6H3v-6z", squad: "M8 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm8 1a3 3 0 1 0 0-6M2 21c0-4 3-6 6-6s6 2 6 6M16 15c3 0 6 2 6 5",
   train: "M3 12h4l3-8 4 16 3-8h4", tactics: "M4 4h16v16H4zM12 4v16M4 12h4M16 12h4", model: "M12 3l9 5-9 5-9-5zM3 13l9 5 9-5", plays: "M5 19c3-1 4-4 6-7s5-6 8-7M15 5h4v4M5 5l4 4M9 5 5 9",
-  cal: "M4 6h16v14H4zM4 10h16M8 3v5M16 3v5", office: "M4 21V8l8-5 8 5v13M9 21v-6h6v6M8 11h.01M16 11h.01", news: "M4 5h13v14H6a2 2 0 0 1-2-2zM17 9h3v8a2 2 0 0 1-2 2M7 9h7M7 13h7M7 16h4", staff: "M9 7a3 3 0 1 0 0-6M9 7a3 3 0 1 1 0-6M3 21c0-4 3-7 6-7s6 3 6 7M17 11l2 2 4-4", cups: "M7 4h10v4a5 5 0 0 1-10 0zM7 6H4a3 3 0 0 0 3 4M17 6h3a3 3 0 0 1-3 4M12 13v4M8 21h8M9 17h6v4H9z", cl: "M12 3l2.5 5 5.5.8-4 3.9.9 5.5L12 15.6 7.1 18.2l.9-5.5-4-3.9 5.5-.8z", market: "M4 7h16l-1.5 12h-13zM9 7a3 3 0 0 1 6 0", fin: "M12 3v18M16 7c0-2-2-3-4-3s-4 1-4 3 2 3 4 3 4 1 4 3-2 3-4 3-4-1-4-3", table: "M4 5h16M4 10h16M4 15h16M4 20h16M9 5v15", stats: "M5 20V10M10 20V4M15 20v-7M20 20v-11", match: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7l3 2-1 4h-4L9 9z", end: "M7 4h10v5a5 5 0 0 1-10 0zM4 5h3M17 5h3M10 17h4v4h-4z", more: "M5 12h.01M12 12h.01M19 12h.01",
+  cal: "M4 6h16v14H4zM4 10h16M8 3v5M16 3v5", office: "M4 21V8l8-5 8 5v13M9 21v-6h6v6M8 11h.01M16 11h.01", coach: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21c0-4 4-7 8-7s8 3 8 7M16 4l2-2M8 4 6 2", coachsetup: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21c0-4 4-7 8-7s8 3 8 7", news: "M4 5h13v14H6a2 2 0 0 1-2-2zM17 9h3v8a2 2 0 0 1-2 2M7 9h7M7 13h7M7 16h4", staff: "M9 7a3 3 0 1 0 0-6M9 7a3 3 0 1 1 0-6M3 21c0-4 3-7 6-7s6 3 6 7M17 11l2 2 4-4", cups: "M7 4h10v4a5 5 0 0 1-10 0zM7 6H4a3 3 0 0 0 3 4M17 6h3a3 3 0 0 1-3 4M12 13v4M8 21h8M9 17h6v4H9z", cl: "M12 3l2.5 5 5.5.8-4 3.9.9 5.5L12 15.6 7.1 18.2l.9-5.5-4-3.9 5.5-.8z", market: "M4 7h16l-1.5 12h-13zM9 7a3 3 0 0 1 6 0", fin: "M12 3v18M16 7c0-2-2-3-4-3s-4 1-4 3 2 3 4 3 4 1 4 3-2 3-4 3-4-1-4-3", table: "M4 5h16M4 10h16M4 15h16M4 20h16M9 5v15", stats: "M5 20V10M10 20V4M15 20v-7M20 20v-11", match: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7l3 2-1 4h-4L9 9z", end: "M7 4h10v5a5 5 0 0 1-10 0zM4 5h3M17 5h3M10 17h4v4h-4z", more: "M5 12h.01M12 12h.01M19 12h.01",
 };
 const BGFX = `<div class="bgfx" aria-hidden="true"><i class="b1"></i><i class="b2"></i><i class="b3"></i><svg class="lines" viewBox="0 0 800 400" preserveAspectRatio="xMidYMid slice"><g fill="none" stroke="#fff" stroke-width="2"><rect x="20" y="20" width="760" height="360"/><line x1="400" y1="20" x2="400" y2="380"/><path d="M20 80 A120 120 0 0 1 140 170 L140 230 A120 120 0 0 1 20 320"/><path d="M780 80 A120 120 0 0 0 660 170 L660 230 A120 120 0 0 0 780 320"/><path stroke-dasharray="10 10" d="M20 30 A180 180 0 0 1 200 170 L200 230 A180 180 0 0 1 20 370"/><path stroke-dasharray="10 10" d="M780 30 A180 180 0 0 0 600 170 L600 230 A180 180 0 0 0 780 370"/><circle cx="400" cy="200" r="50"/></g></svg></div>`;
 const icon = k => `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="${ICON[k] || ICON.more}"/></svg>`;
 const NAV_GROUPS = [
-  { g: "GENERAL", items: [["home", "Inicio"], ["inbox", "Novedades"], ["news", "Noticias"]] },
+  { g: "GENERAL", items: [["home", "Inicio"], ["inbox", "Novedades"], ["news", "Noticias"], ["coach", "Mi perfil"]] },
   { g: "EQUIPO", items: [["squad", "Plantel"], ["train", "Estado físico"], ["staff", "Cuerpo técnico"]] },
   { g: "TÁCTICA", items: [["tactics", "Próximo partido"], ["model", "Modelo de juego"], ["plays", "Jugadas"]] },
   { g: "ENTRENAMIENTO", items: [["cal", "Calendario"]] },
@@ -2638,12 +2764,12 @@ const NAV_GROUPS = [
   { g: "CLUB", items: [["office", "Despacho"], ["market", "Mercado de pases"], ["fin", "Finanzas"]] },
 ];
 const SUBNAV = { office: ["office", "market", "fin"], market: ["office", "market", "fin"], fin: ["office", "market", "fin"], squad: ["squad", "train", "staff"], train: ["squad", "train", "staff"], staff: ["squad", "train", "staff"], tactics: ["tactics", "model", "plays"], model: ["tactics", "model", "plays"], plays: ["tactics", "model", "plays"], table: ["table", "stats", "cl", "cups"], stats: ["table", "stats", "cl", "cups"], cl: ["table", "stats", "cl", "cups"], cups: ["table", "stats", "cl", "cups"] };
-const NAV_NAME = { news: "Noticias", staff: "Cuerpo técnico", cups: "Copas", office: "Despacho", cl: "Champions", market: "Mercado de pases", fin: "Finanzas", home: "Inicio", inbox: "Novedades", squad: "Plantel", train: "Estado físico", tactics: "Próximo partido", model: "Modelo de juego", plays: "Jugadas", cal: "Calendario", table: "Tabla", stats: "Estadísticas", match: "Último partido", end: "Cierre de temporada" };
+const NAV_NAME = { coach: "Mi perfil", news: "Noticias", staff: "Cuerpo técnico", cups: "Copas", office: "Despacho", cl: "Champions", market: "Mercado de pases", fin: "Finanzas", home: "Inicio", inbox: "Novedades", squad: "Plantel", train: "Estado físico", tactics: "Próximo partido", model: "Modelo de juego", plays: "Jugadas", cal: "Calendario", table: "Tabla", stats: "Estadísticas", match: "Último partido", end: "Cierre de temporada" };
 const VIEWS = {
   home: ["Inicio", () => vHome()], inbox: ["Novedades", () => vInbox()], squad: ["Plantel", () => vSquad()], tactics: ["Próximo partido", () => vTactics()],
   cal: ["Calendario", () => vCalendar()], table: ["Tabla de posiciones", () => vTable()], stats: ["Estadísticas", () => vStats()],
   match: ["Informe del partido", () => vMatch()], end: ["Cierre de la temporada", () => vEnd()],
-  news: ["Noticias del handball", () => vNews()], staff: ["Cuerpo técnico y vestuario", () => vStaff()], office: ["Despacho", () => vOffice()], cups: ["Copas", () => vCups()], cl: ["Champions League", () => vCL()], market: ["Mercado de pases", () => vMarket()], fin: ["Finanzas", () => vFinance()],
+  coachsetup: ["Tu perfil de entrenador", () => vCoachSetup()], coach: ["Mi perfil", () => vCoach()], news: ["Noticias del handball", () => vNews()], staff: ["Cuerpo técnico y vestuario", () => vStaff()], office: ["Despacho", () => vOffice()], cups: ["Copas", () => vCups()], cl: ["Champions League", () => vCL()], market: ["Mercado de pases", () => vMarket()], fin: ["Finanzas", () => vFinance()],
   model: ["Modelo de juego", () => vModel()], plays: ["Jugadas", () => vPlays()], train: ["Estado físico y enfermería", () => vTrain()], prematch: ["Día de partido", () => vPrematch()], live: ["En vivo", () => vLive()], press: ["Sala de prensa", () => vPress()],
 };
 function navBadge(k) {
@@ -2675,6 +2801,7 @@ function render() {
 }
 function renderInner() {
   if (!G) return renderStart();
+  if (!G.coachP && !G.pending && !["press", "live", "coachsetup"].includes(UI.view)) UI.view = "coachsetup";
   if (!VIEWS[UI.view]) UI.view = "home";
   if (UI.view !== "live") stopLive();
   const L = LEAGUES[myLg()], lg = G.S.leagues[myLg()], pos = myPos(), nm = nextMatch();
@@ -2706,7 +2833,7 @@ function renderInner() {
       ${v === "live" ? "" : `<div class="mbar-go">${continueBtn()}</div>`}
       <nav class="mtabs" aria-label="Secciones">${tabs.map(([k, l, set]) => `<button class="${set.includes(v) && !UI.more ? "on" : ""}" data-go="${k}">${icon(k)}<span>${l}</span>${k === "home" && unr ? `<i class="dotn"></i>` : ""}</button>`).join("")}<button class="${UI.more ? "on" : ""}" data-act="more">${icon("more")}<span>Más</span></button></nav>
     </div>
-    ${UI.more ? `<div class="sheet-bg" data-act="more"></div><div class="sheet"><div class="sheet-h"><b>Más secciones</b><button class="link" data-act="more">Cerrar</button></div>${[["inbox", "Novedades"], ["news", "Noticias"], ["train", "Estado físico"], ["staff", "Cuerpo técnico"], ["model", "Modelo de juego"], ["plays", "Jugadas"], ["table", "Tabla de posiciones"], ["stats", "Estadísticas"], ["cl", "Champions League"], ["cups", "Copas"], ["office", "Despacho"], ["market", "Mercado de pases"], ["fin", "Finanzas"], ...(G.last ? [["match", "Último partido"]] : []), ...(G.ended ? [["end", "Cierre de temporada"]] : [])].map(([k, l]) => `<button class="sheet-i" data-go="${k}">${icon(k)}<span>${l}</span>${navBadge(k)}</button>`).join("")}<button class="sheet-i dim" data-act="newgame">${icon("more")}<span>Nueva partida</span></button></div>` : ""}
+    ${UI.more ? `<div class="sheet-bg" data-act="more"></div><div class="sheet"><div class="sheet-h"><b>Más secciones</b><button class="link" data-act="more">Cerrar</button></div>${[["inbox", "Novedades"], ["news", "Noticias"], ["coach", "Mi perfil"], ["train", "Estado físico"], ["staff", "Cuerpo técnico"], ["model", "Modelo de juego"], ["plays", "Jugadas"], ["table", "Tabla de posiciones"], ["stats", "Estadísticas"], ["cl", "Champions League"], ["cups", "Copas"], ["office", "Despacho"], ["market", "Mercado de pases"], ["fin", "Finanzas"], ...(G.last ? [["match", "Último partido"]] : []), ...(G.ended ? [["end", "Cierre de temporada"]] : [])].map(([k, l]) => `<button class="sheet-i" data-go="${k}">${icon(k)}<span>${l}</span>${navBadge(k)}</button>`).join("")}<button class="sheet-i dim" data-act="newgame">${icon("more")}<span>Nueva partida</span></button></div>` : ""}
   </div>${UI.modal ? modalHTML() : ""}`;
 }
 
@@ -3078,7 +3205,7 @@ function vPrematch() {
   const rows = POS_ORDER.map(pos => { const p = P(lu[pos]), r = ratingAt(DB, lu[pos], pos); return `<div class="pm-r"><span class="d-pos">${pos}</span><span class="num-c">${p[7] || ""}</span><span class="bn">${esc(p[0])}</span>${condBar(lu[pos])}<span class="med ${r < p[3] ? "warn" : ""}">${r}</span></div>`; }).join("");
   const na = unavailable(), tired = POS_ORDER.map(p => lu[p]).filter(pid => condOf(pid) < 70);
   const pend = pendingActs().filter(m => m.act === "press" && m.day === G.day - 1);
-  return `<section class="card prematch"><div class="pm-vs"><div class="pm-t">${badge(nm.h, 84)}<b>${esc(club(nm.h).n)}</b></div><div class="pm-mid"><span class="kicker">${nm.comp !== "liga" ? esc(nm.label.toUpperCase()) : `FECHA ${nm.round} · ${esc(LEAGUES[myLg()].name.toUpperCase())}`}</span><span class="pm-x">VS</span><span class="muted sm">${esc(club(nm.h).s || club(nm.h).c || "")}</span></div><div class="pm-t">${badge(nm.a, 84)}<b>${esc(club(nm.a).n)}</b></div></div></section>
+  return `<section class="card prematch"><div class="pm-vs"><div class="pm-t">${badge(nm.h, 84)}<b>${esc(club(nm.h).n)}</b></div><div class="pm-mid"><span class="kicker">${nm.comp !== "liga" ? esc(nm.label.toUpperCase()) : `FECHA ${nm.round} · ${esc(LEAGUES[myLg()].name.toUpperCase())}`}</span><span class="pm-x">VS</span><span class="muted sm">${esc(club(nm.h).s || club(nm.h).c || "")}</span>${(() => { const rv = nm.h === G.myClub ? nm.a : nm.h, c = coachOf(rv); return `<span class="sm" style="margin-top:6px">DT rival: <b>${esc(c.name)}</b> · ${COACH_STYLES[c.style][0].toLowerCase()}</span>`; })()}</div><div class="pm-t">${badge(nm.a, 84)}<b>${esc(club(nm.a).n)}</b></div></div></section>
   <div class="two">
     <section class="card"><div class="row-between"><span class="kicker">TU SIETE</span><button class="link sm" data-go="tactics">Cambiar</button></div>${rows}</section>
     <section class="card"><span class="kicker">CÓMO LLEGAMOS</span>
@@ -3887,7 +4014,7 @@ document.addEventListener("pointercancel", () => { if (DRAG && DRAG.ghost) { DRA
 // ---------- eventos ----------
 document.addEventListener("click", e => {
   if (SUPPRESS_CLICK) { e.preventDefault(); return; }
-  const el = e.target.closest("[data-job],[data-sv],[data-newsf],[data-stab],[data-stfire],[data-sthire],[data-ptalk],[data-posttalk],[data-conf],[data-cupsel],[data-drole],[data-dswap],[data-cltab],[data-mksel],[data-mkpage],[data-mkloan],[data-feek],[data-ltab],[data-lmodel],[data-model],[data-pfreq],[data-pact],[data-pedit],[data-pdel],[data-pcopy],[data-edstep],[data-edfin],[data-edtype],[data-edtok],[data-lplay],[data-caltab],[data-calweek],[data-calmonth],[data-calday],[data-slot],[data-sess],[data-stylemenu],[data-wstyle],[data-ltac],[data-lsub],[data-lin],[data-mark],[data-rot],[data-instr],[data-intens],[data-train2],[data-go],[data-act],[data-pick],[data-club],[data-tac],[data-lg],[data-slg],[data-round],[data-pl],[data-tok],[data-bench],[data-swap],[data-mode],[data-filter],[data-msg],[data-train],[data-pressgo],[data-ans],[data-speed]");
+  const el = e.target.closest("[data-job],[data-sv],[data-cs],[data-newsf],[data-stab],[data-stfire],[data-sthire],[data-ptalk],[data-posttalk],[data-conf],[data-cupsel],[data-drole],[data-dswap],[data-cltab],[data-mksel],[data-mkpage],[data-mkloan],[data-feek],[data-ltab],[data-lmodel],[data-model],[data-pfreq],[data-pact],[data-pedit],[data-pdel],[data-pcopy],[data-edstep],[data-edfin],[data-edtype],[data-edtok],[data-lplay],[data-caltab],[data-calweek],[data-calmonth],[data-calday],[data-slot],[data-sess],[data-stylemenu],[data-wstyle],[data-ltac],[data-lsub],[data-lin],[data-mark],[data-rot],[data-instr],[data-intens],[data-train2],[data-go],[data-act],[data-pick],[data-club],[data-tac],[data-lg],[data-slg],[data-round],[data-pl],[data-tok],[data-bench],[data-swap],[data-mode],[data-filter],[data-msg],[data-train],[data-pressgo],[data-ans],[data-speed]");
   if (!el) return;
   const d = el.dataset;
   if (d.cltab !== undefined) { UI.clTab = d.cltab; render(); return; }
@@ -3925,6 +4052,7 @@ document.addEventListener("click", e => {
   if (d.intens !== undefined) { G.intens = d.intens; save(); render(); return; }
   if (d.train2 !== undefined) { G.train = d.train2; const m = G.inbox.find(x => x.act === "train" && !x.done && x.season === G.season); if (m) { m.done = true; m.choice = d.train2; } save(); render(); return; }
   if (d.go !== undefined) { UI.more = false; if (d.go === "inbox") { const u = G.inbox.find(m => !m.read) || G.inbox[0]; UI.msg = u ? u.id : null; } UI.view = d.go; UI.benchSel = null; render(); scrollTop(); return; }
+  if (d.cs !== undefined) { readCoachForm(); UI.cs[d.cs] = d.val; render(); return; }
   if (d.newsf !== undefined) { UI.newsF = d.newsf; render(); return; }
   if (d.stab !== undefined) { UI.staffTab = d.stab; render(); return; }
   if (d.stfire !== undefined) { const r = d.stfire; UI.modal = { title: "Despedir", text: `${G.staff[r].name} deja de ser tu ${STAFF_ROLES[r][0].toLowerCase()}.`, ok: "Despedir", run: () => { G.staff[r] = null; save(); render(); } }; render(); return; }
@@ -4009,6 +4137,8 @@ document.addEventListener("click", e => {
     case "auto": G.lineup = autoLineup(DB, G.myClub); UI.benchSel = null; save(); render(); break;
     case "next": nextSeason(); break;
     case "export": save(); downloadSave(G); break;
+    case "cssave": saveCoach(); break;
+    case "csedit": { const c = G.coachP; UI.cs = { name: c.name, nat: c.nat, age: coachAge(), path: c.path, style: c.style, spec: c.spec }; UI.view = "coachsetup"; render(); scrollTop(); break; }
     case "defauto": defAuto(); render(); break;
     case "jobno": G.jobOffers = []; save(); render(); break;
     case "resume": G = migrate(load()); if (G.pending) resolvePending(); UI.view = G.ended ? "end" : "home"; save(); render(); break;
